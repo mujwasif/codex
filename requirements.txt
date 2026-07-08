@@ -1,0 +1,32 @@
+# Codex Policy Intelligence Engine - Dependencies
+# Python 3.10+
+
+# Web Framework
+fastapi==0.135.1
+uvicorn==0.42.0
+
+# Database
+sqlalchemy==2.0.48
+pgvector==0.4.2
+
+# Authentication
+python-jose==3.5.0
+hashward==0.1.0
+
+# Data Validation
+pydantic==2.12.5
+
+# Document Parsing
+python-docx==1.2.0
+PyPDF2==3.0.1
+
+# Embeddings & Search
+sentence-transformers==5.2.3
+rank-bm25==0.2.2
+numpy==1.26.4
+
+# HTTP Client
+requests==2.32.5
+
+# Machine Learning
+torch==2.5.1+cu121
