@@ -1,0 +1,263 @@
+/home/mujtaba/new_folder/codex/services/ingestion/ingest.py:135: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  effective_date=datetime.utcnow()
+Initializing database...
+✅ Database tables created/verified
+Starting ingestion pipeline with structure-aware chunking...
+
+Processing: UnderDefense MAXI - Data retention and destruction policy.docx
+  Parsing structure of UnderDefense MAXI - Data retention and destruction policy.docx...
+  Chunking UnderDefense MAXI - Data retention and destruction policy.docx with clause-level detection...
+  Created 63 clause-level chunks from 14 sections
+  Token stats: avg=12.3, min=1, max=33
+  Successfully ingested UnderDefense MAXI - Data retention and destruction policy.docx: 63 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Business continuity_Disaster recovery plan.docx
+  Parsing structure of UnderDefense MAXI - Business continuity_Disaster recovery plan.docx...
+  Chunking UnderDefense MAXI - Business continuity_Disaster recovery plan.docx with clause-level detection...
+  LLM returned invalid JSON: Extra data: line 2 column 1 (char 56)
+  LLM returned invalid JSON: Expecting ',' delimiter: line 1 column 125 (char 124)
+  Created 392 clause-level chunks from 32 sections
+  Token stats: avg=12.9, min=1, max=53
+  Error processing UnderDefense MAXI - Business continuity_Disaster recovery plan.docx: (psycopg2.errors.StringDataRightTruncation) value too long for type character varying(100)
+
+[SQL: INSERT INTO chunks (id, document_id, section_path, clause_ref, page, text, embedding, token_count, version, created_at) VALUES (%(id__0)s, %(document_id__0)s, %(section_path__0)s, %(clause_ref__0)s, %(page__0)s, %(text__0)s, %(embedding__0)s, %(token ... 73939 characters truncated ... 1)s, %(text__391)s, %(embedding__391)s, %(token_count__391)s, %(version__391)s, %(created_at__391)s)]
+[parameters: {'version__0': 'v1', 'page__0': None, 'document_id__0': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__0': '6bb045cf-d645-471d-954f-bff20c36f750', 'clause_ref__0': '0 Document Header > Rule 1', 'text__0': '<Your Company Logo>', 'created_at__0': datetime.datetime(2026, 7, 5, 7, 41, 13, 807558), 'embedding__0': '[0.0016035091830417514, -0.010595161467790604, 0.030700838193297386, -0.015436935238540173, 0.03737751394510269, -0.048214636743068695, 0.04169959574 ... (22352 characters truncated) ... 4170976132154465, 0.02640562877058983, 0.03407692909240723, 0.00430039269849658, 0.008740358054637909, -0.0045204865746200085, -0.003949013538658619]', 'token_count__0': 3, 'section_path__0': '0', 'version__1': 'v1', 'page__1': None, 'document_id__1': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__1': '840d19f5-f31f-4759-a0b5-092cb574f528', 'clause_ref__1': '0 Document Header > Rule 2', 'text__1': 'Business Continuity & Disaster Recovery Plan', 'created_at__1': datetime.datetime(2026, 7, 5, 7, 41, 13, 807561), 'embedding__1': '[-0.0076256380416452885, 0.04861169308423996, -0.00528024323284626, 0.04789183661341667, -0.03247969225049019, -0.0004526589182205498, -0.03271369636 ... (22426 characters truncated) ... 30099716037511826, 0.014927176758646965, -0.004635844379663467, 0.02204536274075508, 0.0019155252957716584, 0.039056312292814255, 0.0346677303314209]', 'token_count__1': 6, 'section_path__1': '0', 'version__2': 'v1', 'page__2': None, 'document_id__2': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__2': 'a57e1837-76e9-4b59-8247-d7ec4e6df17e', 'clause_ref__2': '1 Version Control Table > Rule 1', 'text__2': 'This policy will be reviewed for continued completeness, relevance, and accuracy within 1 year of being granted “final” status and at yearly intervals after that.', 'created_at__2': datetime.datetime(2026, 7, 5, 7, 41, 13, 807562), 'embedding__2': '[-0.005600363481789827, -0.012494671158492565, 0.010312319733202457, 0.040786754339933395, 0.0031589551363140345, 0.035687193274497986, -0.0070281890 ... (22417 characters truncated) ... 971120972186327, 0.00921294093132019, 0.027799980714917183, 0.03622879087924957, -0.035555195063352585, 0.025018395856022835, -0.0047195544466376305]', 'token_count__2': 25, 'section_path__2': '1', 'version__3': 'v1', 'page__3': None, 'document_id__3': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__3': 'a044369a-ca25-4e0a-9890-598f8f46826f', 'clause_ref__3': '1 Version Control Table > Rule 2', 'text__3': 'The version control table will show the published update date', 'created_at__3': datetime.datetime(2026, 7, 5, 7, 41, 13, 807564), 'embedding__3': '[-0.009322665631771088, -0.0064470767974853516, 0.015745259821414948, -0.0017424518009647727, -0.020746435970067978, -0.02713894098997116, 0.01887617 ... (22394 characters truncated) ... 433977484703064, 0.019409259781241417, 0.027957959100604057, 0.04893344268202782, 0.0033451952040195465, 0.0008095890516415238, -0.00651280814781785]', 'token_count__3': 10, 'section_path__3': '1', 'version__4': 'v1', 'page__4': None, 'document_id__4': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__4': '62bbe5a9-2ac9-4f19-9676-b97b449864be', 'clause_ref__4': '1 Version Control Table > Rule 3', 'text__4': 'published update date The version control table will provide a thumbnail of the significant change', 'created_at__4': datetime.datetime(2026, 7, 5, 7, 41, 13, 807565), 'embedding__4': '[0.009123014286160469, -0.009798782877624035, 0.004929332062602043, 0.005986059084534645, -0.011540553532540798, -0.024658186361193657, -0.0002176943 ... (22403 characters truncated) ... 8124501910060644, 0.017572535201907158, 0.013919168151915073, 0.05154167860746384, -0.013854628428816795, 0.026931069791316986, 0.009889490902423859]', 'token_count__4': 15, 'section_path__4': '1' ... 3820 parameters truncated ... 'version__387': 'v1', 'page__387': None, 'document_id__387': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__387': 'f11ee643-5acb-495c-98d2-7cffa87653c6', 'clause_ref__387': '14 Related Documents > Rule 26', 'text__387': '& Internal Infrastructure Backup personnel', 'created_at__387': datetime.datetime(2026, 7, 5, 7, 41, 13, 808109), 'embedding__387': '[-0.007932652719318867, -0.041196856647729874, -0.0010828222148120403, 0.00023112156486604363, -0.009522282518446445, -0.011262219399213791, -0.03043 ... (22387 characters truncated) ... 44552285969257, -0.011997654102742672, 0.023225296288728714, 0.026632120832800865, -0.03603166714310646, 0.010651804506778717, 0.0003874665417242795]', 'token_count__387': 5, 'section_path__387': '14', 'version__388': 'v1', 'page__388': None, 'document_id__388': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__388': '7b7fd25f-096e-4fd0-9634-637e9ee18c8a', 'clause_ref__388': '14 Related Documents > Rule 27', 'text__388': 'Infrastructure Backup personnel Project Manager', 'created_at__388': datetime.datetime(2026, 7, 5, 7, 41, 13, 808110), 'embedding__388': '[0.02048981934785843, -0.03332873806357384, -0.025582486763596535, 0.02662772126495838, -0.013539241626858711, -0.018744051456451416, -0.036766890436 ... (22344 characters truncated) ... 939790070057, 0.0006117254379205406, 0.0005378470523282886, 0.012802877463400364, -0.05025479197502136, -0.0019494884181767702, 0.014711380936205387]', 'token_count__388': 5, 'section_path__388': '14', 'version__389': 'v1', 'page__389': None, 'document_id__389': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__389': '66edc2f1-8867-4daf-babf-d1aaab7a70d0', 'clause_ref__389': '14 Related Documents > Rule 28', 'text__389': 'personnel Project Manager Physical Security, <Departments Processes Management>, Communication with Clients, Human Resources Management', 'created_at__389': datetime.datetime(2026, 7, 5, 7, 41, 13, 808112), 'embedding__389': '[0.011337225325405598, -0.005796285346150398, -0.035492006689310074, 0.0003640871145762503, -0.04946683347225189, -0.051488928496837616, -0.037345837 ... (22462 characters truncated) ... 4474833905697, -0.0005526883760467172, 0.016302140429615974, 0.02366686426103115, -0.034748613834381104, -0.024892756715416908, 0.022780805826187134]', 'token_count__389': 14, 'section_path__389': '14', 'version__390': 'v1', 'page__390': None, 'document_id__390': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__390': '068c1fc0-1df7-4905-b5e1-665d84a66d68', 'clause_ref__390': '14 Related Documents > Rule 29', 'text__390': 'Human Resources Management Finance', 'created_at__390': datetime.datetime(2026, 7, 5, 7, 41, 13, 808113), 'embedding__390': '[-0.0011716685257852077, 0.01652643270790577, -0.025712698698043823, 0.010888425633311272, -0.04912713170051575, -0.016733495518565178, 0.01456564106 ... (22409 characters truncated) ... 63935336470604, -0.006376890931278467, 0.028187137097120285, 0.024342620745301247, -0.011341763660311699, -0.006965511478483677, 0.03140711411833763]', 'token_count__390': 4, 'section_path__390': '14', 'version__391': 'v1', 'page__391': None, 'document_id__391': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__391': '8b3267e6-fd16-4e18-8faa-65de1a626fdc', 'clause_ref__391': '14 Related Documents > Rule 30', 'text__391': 'Resources Management Finance Financial Management, Human Resources Management', 'created_at__391': datetime.datetime(2026, 7, 5, 7, 41, 13, 808114), 'embedding__391': '[0.004022254608571529, 0.007314733229577541, -0.023326311260461807, 0.026213763281702995, -0.05898464471101761, -0.03338930383324623, 0.0245007295161 ... (22400 characters truncated) ... 8457772731781, -0.00025145767722278833, 0.02659413404762745, -0.009994049556553364, -0.017422214150428772, -0.02469513565301895, 0.03547963872551918]', 'token_count__391': 8, 'section_path__391': '14'}]
+(Background on this error at: https://sqlalche.me/e/20/9h9h)Traceback (most recent call last):
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2125, in _exec_insertmany_context
+    dialect.do_execute(
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+psycopg2.errors.StringDataRightTruncation: value too long for type character varying(100)
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/mujtaba/new_folder/codex/services/ingestion/ingest.py", line 177, in ingest_file
+    session.commit()
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 2030, in commit
+    trans.commit(_to_root=True)
+  File "<string>", line 2, in commit
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/orm/state_changes.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 1311, in commit
+    self._prepare_impl()
+  File "<string>", line 2, in _prepare_impl
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/orm/state_changes.py", line 137, in _go
+    ret_value = fn(self, *arg, **kw)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 1286, in _prepare_impl
+    self.session.flush()
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 4331, in flush
+    self._flush(objects)
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 4466, in _flush
+    with util.safe_reraise():
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/util/langhelpers.py", line 121, in __exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", line 4427, in _flush
+    flush_context.execute()
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/orm/unitofwork.py", line 466, in execute
+    rec.execute(self)
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/orm/unitofwork.py", line 642, in execute
+    util.preloaded.orm_persistence.save_obj(
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/orm/persistence.py", line 93, in save_obj
+    _emit_insert_statements(
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/orm/persistence.py", line 1048, in _emit_insert_statements
+    result = connection.execute(
+             ^^^^^^^^^^^^^^^^^^^
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1419, in execute
+    return meth(
+           ^^^^^
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/sql/elements.py", line 527, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1641, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 1844, in _execute_context
+    return self._exec_insertmany_context(dialect, context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2133, in _exec_insertmany_context
+    self._handle_dbapi_exception(
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2363, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py", line 2125, in _exec_insertmany_context
+    dialect.do_execute(
+  File "/home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages/sqlalchemy/engine/default.py", line 952, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.DataError: (psycopg2.errors.StringDataRightTruncation) value too long for type character varying(100)
+
+[SQL: INSERT INTO chunks (id, document_id, section_path, clause_ref, page, text, embedding, token_count, version, created_at) VALUES (%(id__0)s, %(document_id__0)s, %(section_path__0)s, %(clause_ref__0)s, %(page__0)s, %(text__0)s, %(embedding__0)s, %(token ... 73939 characters truncated ... 1)s, %(text__391)s, %(embedding__391)s, %(token_count__391)s, %(version__391)s, %(created_at__391)s)]
+[parameters: {'version__0': 'v1', 'page__0': None, 'document_id__0': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__0': '6bb045cf-d645-471d-954f-bff20c36f750', 'clause_ref__0': '0 Document Header > Rule 1', 'text__0': '<Your Company Logo>', 'created_at__0': datetime.datetime(2026, 7, 5, 7, 41, 13, 807558), 'embedding__0': '[0.0016035091830417514, -0.010595161467790604, 0.030700838193297386, -0.015436935238540173, 0.03737751394510269, -0.048214636743068695, 0.04169959574 ... (22352 characters truncated) ... 4170976132154465, 0.02640562877058983, 0.03407692909240723, 0.00430039269849658, 0.008740358054637909, -0.0045204865746200085, -0.003949013538658619]', 'token_count__0': 3, 'section_path__0': '0', 'version__1': 'v1', 'page__1': None, 'document_id__1': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__1': '840d19f5-f31f-4759-a0b5-092cb574f528', 'clause_ref__1': '0 Document Header > Rule 2', 'text__1': 'Business Continuity & Disaster Recovery Plan', 'created_at__1': datetime.datetime(2026, 7, 5, 7, 41, 13, 807561), 'embedding__1': '[-0.0076256380416452885, 0.04861169308423996, -0.00528024323284626, 0.04789183661341667, -0.03247969225049019, -0.0004526589182205498, -0.03271369636 ... (22426 characters truncated) ... 30099716037511826, 0.014927176758646965, -0.004635844379663467, 0.02204536274075508, 0.0019155252957716584, 0.039056312292814255, 0.0346677303314209]', 'token_count__1': 6, 'section_path__1': '0', 'version__2': 'v1', 'page__2': None, 'document_id__2': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__2': 'a57e1837-76e9-4b59-8247-d7ec4e6df17e', 'clause_ref__2': '1 Version Control Table > Rule 1', 'text__2': 'This policy will be reviewed for continued completeness, relevance, and accuracy within 1 year of being granted “final” status and at yearly intervals after that.', 'created_at__2': datetime.datetime(2026, 7, 5, 7, 41, 13, 807562), 'embedding__2': '[-0.005600363481789827, -0.012494671158492565, 0.010312319733202457, 0.040786754339933395, 0.0031589551363140345, 0.035687193274497986, -0.0070281890 ... (22417 characters truncated) ... 971120972186327, 0.00921294093132019, 0.027799980714917183, 0.03622879087924957, -0.035555195063352585, 0.025018395856022835, -0.0047195544466376305]', 'token_count__2': 25, 'section_path__2': '1', 'version__3': 'v1', 'page__3': None, 'document_id__3': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__3': 'a044369a-ca25-4e0a-9890-598f8f46826f', 'clause_ref__3': '1 Version Control Table > Rule 2', 'text__3': 'The version control table will show the published update date', 'created_at__3': datetime.datetime(2026, 7, 5, 7, 41, 13, 807564), 'embedding__3': '[-0.009322665631771088, -0.0064470767974853516, 0.015745259821414948, -0.0017424518009647727, -0.020746435970067978, -0.02713894098997116, 0.01887617 ... (22394 characters truncated) ... 433977484703064, 0.019409259781241417, 0.027957959100604057, 0.04893344268202782, 0.0033451952040195465, 0.0008095890516415238, -0.00651280814781785]', 'token_count__3': 10, 'section_path__3': '1', 'version__4': 'v1', 'page__4': None, 'document_id__4': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__4': '62bbe5a9-2ac9-4f19-9676-b97b449864be', 'clause_ref__4': '1 Version Control Table > Rule 3', 'text__4': 'published update date The version control table will provide a thumbnail of the significant change', 'created_at__4': datetime.datetime(2026, 7, 5, 7, 41, 13, 807565), 'embedding__4': '[0.009123014286160469, -0.009798782877624035, 0.004929332062602043, 0.005986059084534645, -0.011540553532540798, -0.024658186361193657, -0.0002176943 ... (22403 characters truncated) ... 8124501910060644, 0.017572535201907158, 0.013919168151915073, 0.05154167860746384, -0.013854628428816795, 0.026931069791316986, 0.009889490902423859]', 'token_count__4': 15, 'section_path__4': '1' ... 3820 parameters truncated ... 'version__387': 'v1', 'page__387': None, 'document_id__387': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__387': 'f11ee643-5acb-495c-98d2-7cffa87653c6', 'clause_ref__387': '14 Related Documents > Rule 26', 'text__387': '& Internal Infrastructure Backup personnel', 'created_at__387': datetime.datetime(2026, 7, 5, 7, 41, 13, 808109), 'embedding__387': '[-0.007932652719318867, -0.041196856647729874, -0.0010828222148120403, 0.00023112156486604363, -0.009522282518446445, -0.011262219399213791, -0.03043 ... (22387 characters truncated) ... 44552285969257, -0.011997654102742672, 0.023225296288728714, 0.026632120832800865, -0.03603166714310646, 0.010651804506778717, 0.0003874665417242795]', 'token_count__387': 5, 'section_path__387': '14', 'version__388': 'v1', 'page__388': None, 'document_id__388': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__388': '7b7fd25f-096e-4fd0-9634-637e9ee18c8a', 'clause_ref__388': '14 Related Documents > Rule 27', 'text__388': 'Infrastructure Backup personnel Project Manager', 'created_at__388': datetime.datetime(2026, 7, 5, 7, 41, 13, 808110), 'embedding__388': '[0.02048981934785843, -0.03332873806357384, -0.025582486763596535, 0.02662772126495838, -0.013539241626858711, -0.018744051456451416, -0.036766890436 ... (22344 characters truncated) ... 939790070057, 0.0006117254379205406, 0.0005378470523282886, 0.012802877463400364, -0.05025479197502136, -0.0019494884181767702, 0.014711380936205387]', 'token_count__388': 5, 'section_path__388': '14', 'version__389': 'v1', 'page__389': None, 'document_id__389': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__389': '66edc2f1-8867-4daf-babf-d1aaab7a70d0', 'clause_ref__389': '14 Related Documents > Rule 28', 'text__389': 'personnel Project Manager Physical Security, <Departments Processes Management>, Communication with Clients, Human Resources Management', 'created_at__389': datetime.datetime(2026, 7, 5, 7, 41, 13, 808112), 'embedding__389': '[0.011337225325405598, -0.005796285346150398, -0.035492006689310074, 0.0003640871145762503, -0.04946683347225189, -0.051488928496837616, -0.037345837 ... (22462 characters truncated) ... 4474833905697, -0.0005526883760467172, 0.016302140429615974, 0.02366686426103115, -0.034748613834381104, -0.024892756715416908, 0.022780805826187134]', 'token_count__389': 14, 'section_path__389': '14', 'version__390': 'v1', 'page__390': None, 'document_id__390': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__390': '068c1fc0-1df7-4905-b5e1-665d84a66d68', 'clause_ref__390': '14 Related Documents > Rule 29', 'text__390': 'Human Resources Management Finance', 'created_at__390': datetime.datetime(2026, 7, 5, 7, 41, 13, 808113), 'embedding__390': '[-0.0011716685257852077, 0.01652643270790577, -0.025712698698043823, 0.010888425633311272, -0.04912713170051575, -0.016733495518565178, 0.01456564106 ... (22409 characters truncated) ... 63935336470604, -0.006376890931278467, 0.028187137097120285, 0.024342620745301247, -0.011341763660311699, -0.006965511478483677, 0.03140711411833763]', 'token_count__390': 4, 'section_path__390': '14', 'version__391': 'v1', 'page__391': None, 'document_id__391': '41c9b0b7-9233-40e5-9934-88e9ee988d6f', 'id__391': '8b3267e6-fd16-4e18-8faa-65de1a626fdc', 'clause_ref__391': '14 Related Documents > Rule 30', 'text__391': 'Resources Management Finance Financial Management, Human Resources Management', 'created_at__391': datetime.datetime(2026, 7, 5, 7, 41, 13, 808114), 'embedding__391': '[0.004022254608571529, 0.007314733229577541, -0.023326311260461807, 0.026213763281702995, -0.05898464471101761, -0.03338930383324623, 0.0245007295161 ... (22400 characters truncated) ... 8457772731781, -0.00025145767722278833, 0.02659413404762745, -0.009994049556553364, -0.017422214150428772, -0.02469513565301895, 0.03547963872551918]', 'token_count__391': 8, 'section_path__391': '14'}]
+(Background on this error at: https://sqlalche.me/e/20/9h9h)
+
+
+Processing: UnderDefense MAXI - Human resource security policy.docx
+  Parsing structure of UnderDefense MAXI - Human resource security policy.docx...
+  Chunking UnderDefense MAXI - Human resource security policy.docx with clause-level detection...
+  Created 119 clause-level chunks from 16 sections
+  Token stats: avg=10.8, min=2, max=31
+  Successfully ingested UnderDefense MAXI - Human resource security policy.docx: 119 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Remote access policy.docx
+  Parsing structure of UnderDefense MAXI - Remote access policy.docx...
+  Chunking UnderDefense MAXI - Remote access policy.docx with clause-level detection...
+  Created 49 clause-level chunks from 11 sections
+  Token stats: avg=12.6, min=1, max=25
+  Successfully ingested UnderDefense MAXI - Remote access policy.docx: 49 chunks, 2 entities
+
+Processing: UnderDefense MAXI - Access management policy.docx
+  Parsing structure of UnderDefense MAXI - Access management policy.docx...
+  Chunking UnderDefense MAXI - Access management policy.docx with clause-level detection...
+  Created 82 clause-level chunks from 17 sections
+  Token stats: avg=12.5, min=3, max=47
+  Successfully ingested UnderDefense MAXI - Access management policy.docx: 82 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Password management policy.docx
+  Parsing structure of UnderDefense MAXI - Password management policy.docx...
+  Chunking UnderDefense MAXI - Password management policy.docx with clause-level detection...
+  LLM returned invalid JSON: Invalid \escape: line 1 column 75 (char 74)
+  Created 48 clause-level chunks from 15 sections
+  Token stats: avg=11.9, min=1, max=31
+  Successfully ingested UnderDefense MAXI - Password management policy.docx: 48 chunks, 6 entities
+
+Processing: UnderDefense MAXI - Software installation policy.docx
+  Parsing structure of UnderDefense MAXI - Software installation policy.docx...
+  Chunking UnderDefense MAXI - Software installation policy.docx with clause-level detection...
+  Created 68 clause-level chunks from 16 sections
+  Token stats: avg=12.8, min=2, max=39
+  Successfully ingested UnderDefense MAXI - Software installation policy.docx: 68 chunks, 3 entities
+
+Processing: UnderDefense MAXI - Backup policy.docx
+  Parsing structure of UnderDefense MAXI - Backup policy.docx...
+  Chunking UnderDefense MAXI - Backup policy.docx with clause-level detection...
+  Created 56 clause-level chunks from 15 sections
+  Token stats: avg=12.6, min=1, max=27
+  Successfully ingested UnderDefense MAXI - Backup policy.docx: 56 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Anti-virus_Anti-malware policy.docx
+  Parsing structure of UnderDefense MAXI - Anti-virus_Anti-malware policy.docx...
+  Chunking UnderDefense MAXI - Anti-virus_Anti-malware policy.docx with clause-level detection...
+  Created 70 clause-level chunks from 14 sections
+  Token stats: avg=10.8, min=1, max=25
+  Successfully ingested UnderDefense MAXI - Anti-virus_Anti-malware policy.docx: 70 chunks, 6 entities
+
+Processing: UnderDefense MAXI - Asset management policy.docx
+  Parsing structure of UnderDefense MAXI - Asset management policy.docx...
+  Chunking UnderDefense MAXI - Asset management policy.docx with clause-level detection...
+  LLM returned invalid JSON: Unterminated string starting at: line 1 column 2 (char 1)
+  Created 88 clause-level chunks from 17 sections
+  Token stats: avg=10.5, min=1, max=27
+  Successfully ingested UnderDefense MAXI - Asset management policy.docx: 88 chunks, 4 entities
+
+Processing: UnderDefense MAXI - Physical security policy.docx
+  Parsing structure of UnderDefense MAXI - Physical security policy.docx...
+  Chunking UnderDefense MAXI - Physical security policy.docx with clause-level detection...
+  Created 93 clause-level chunks from 14 sections
+  Token stats: avg=12.7, min=3, max=35
+  Successfully ingested UnderDefense MAXI - Physical security policy.docx: 93 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Risk management policy.docx
+  Parsing structure of UnderDefense MAXI - Risk management policy.docx...
+  Chunking UnderDefense MAXI - Risk management policy.docx with clause-level detection...
+  Created 133 clause-level chunks from 15 sections
+  Token stats: avg=7.9, min=1, max=30
+  Successfully ingested UnderDefense MAXI - Risk management policy.docx: 133 chunks, 4 entities
+
+Processing: UnderDefense MAXI - Log management policy.docx
+  Parsing structure of UnderDefense MAXI - Log management policy.docx...
+  Chunking UnderDefense MAXI - Log management policy.docx with clause-level detection...
+  Created 87 clause-level chunks from 15 sections
+  Token stats: avg=9.5, min=1, max=24
+  Successfully ingested UnderDefense MAXI - Log management policy.docx: 87 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Change management policy.docx
+  Parsing structure of UnderDefense MAXI - Change management policy.docx...
+  Chunking UnderDefense MAXI - Change management policy.docx with clause-level detection...
+  Created 139 clause-level chunks from 16 sections
+  Token stats: avg=12.6, min=2, max=48
+  Successfully ingested UnderDefense MAXI - Change management policy.docx: 139 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Incident response plan.docx
+  Parsing structure of UnderDefense MAXI - Incident response plan.docx...
+  Chunking UnderDefense MAXI - Incident response plan.docx with clause-level detection...
+  LLM returned invalid JSON: Expecting ':' delimiter: line 1 column 60 (char 59)
+  LLM returned invalid JSON: Extra data: line 2 column 1 (char 60)
+  LLM returned invalid JSON: Expecting ':' delimiter: line 1 column 39 (char 38)
+  Created 233 clause-level chunks from 22 sections
+  Token stats: avg=11.1, min=1, max=38
+  Successfully ingested UnderDefense MAXI - Incident response plan.docx: 233 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Clear desk and screen policy.docx
+  Parsing structure of UnderDefense MAXI - Clear desk and screen policy.docx...
+  Chunking UnderDefense MAXI - Clear desk and screen policy.docx with clause-level detection...
+  Created 43 clause-level chunks from 11 sections
+  Token stats: avg=14.6, min=3, max=35
+  Successfully ingested UnderDefense MAXI - Clear desk and screen policy.docx: 43 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Bring your own device policy.docx
+  Parsing structure of UnderDefense MAXI - Bring your own device policy.docx...
+  Chunking UnderDefense MAXI - Bring your own device policy.docx with clause-level detection...
+  Created 62 clause-level chunks from 11 sections
+  Token stats: avg=12.4, min=1, max=33
+  Successfully ingested UnderDefense MAXI - Bring your own device policy.docx: 62 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Removable media policy.docx
+  Parsing structure of UnderDefense MAXI - Removable media policy.docx...
+  Chunking UnderDefense MAXI - Removable media policy.docx with clause-level detection...
+  LLM returned invalid JSON: Extra data: line 2 column 1 (char 65)
+  Created 19 clause-level chunks from 9 sections
+  Token stats: avg=14.5, min=3, max=36
+  Successfully ingested UnderDefense MAXI - Removable media policy.docx: 19 chunks, 2 entities
+
+Processing: UnderDefense MAXI - Information security policy.docx
+  Parsing structure of UnderDefense MAXI - Information security policy.docx...
+  Chunking UnderDefense MAXI - Information security policy.docx with clause-level detection...
+  Created 66 clause-level chunks from 14 sections
+  Token stats: avg=12.7, min=3, max=46
+  Successfully ingested UnderDefense MAXI - Information security policy.docx: 66 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Supplier security policy.docx
+  Parsing structure of UnderDefense MAXI - Supplier security policy.docx...
+  Chunking UnderDefense MAXI - Supplier security policy.docx with clause-level detection...
+  Created 51 clause-level chunks from 17 sections
+  Token stats: avg=11.7, min=1, max=27
+  Successfully ingested UnderDefense MAXI - Supplier security policy.docx: 51 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Patch management policy.docx
+  Parsing structure of UnderDefense MAXI - Patch management policy.docx...
+  Chunking UnderDefense MAXI - Patch management policy.docx with clause-level detection...
+  Created 56 clause-level chunks from 13 sections
+  Token stats: avg=12.1, min=2, max=31
+  Successfully ingested UnderDefense MAXI - Patch management policy.docx: 56 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Vulnerability management policy.docx
+  Parsing structure of UnderDefense MAXI - Vulnerability management policy.docx...
+  Chunking UnderDefense MAXI - Vulnerability management policy.docx with clause-level detection...
+  Created 64 clause-level chunks from 16 sections
+  Token stats: avg=13.5, min=2, max=31
+  Successfully ingested UnderDefense MAXI - Vulnerability management policy.docx: 64 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Physical media transfer policy.docx
+  Parsing structure of UnderDefense MAXI - Physical media transfer policy.docx...
+  Chunking UnderDefense MAXI - Physical media transfer policy.docx with clause-level detection...
+  Created 54 clause-level chunks from 14 sections
+  Token stats: avg=13.5, min=2, max=45
+  Successfully ingested UnderDefense MAXI - Physical media transfer policy.docx: 54 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Encryption policy.docx
+  Parsing structure of UnderDefense MAXI - Encryption policy.docx...
+  Chunking UnderDefense MAXI - Encryption policy.docx with clause-level detection...
+  Created 48 clause-level chunks from 12 sections
+  Token stats: avg=10.6, min=2, max=26
+  Successfully ingested UnderDefense MAXI - Encryption policy.docx: 48 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Network security policy.docx
+  Parsing structure of UnderDefense MAXI - Network security policy.docx...
+  Chunking UnderDefense MAXI - Network security policy.docx with clause-level detection...
+  Created 51 clause-level chunks from 13 sections
+  Token stats: avg=13.1, min=3, max=25
+  Successfully ingested UnderDefense MAXI - Network security policy.docx: 51 chunks, 5 entities
+
+Ingestion process complete.

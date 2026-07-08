@@ -1,0 +1,191 @@
+/home/mujtaba/new_folder/codex/services/ingestion/ingest.py:135: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  effective_date=datetime.utcnow()
+⚠️ PostgreSQL unavailable, using SQLite for development
+Initializing database...
+✅ Database tables created/verified
+Starting ingestion pipeline with structure-aware chunking...
+
+Processing: UnderDefense MAXI - Data retention and destruction policy.docx
+  Parsing structure of UnderDefense MAXI - Data retention and destruction policy.docx...
+  Chunking UnderDefense MAXI - Data retention and destruction policy.docx with clause-level detection...
+  Created 63 clause-level chunks from 14 sections
+  Token stats: avg=12.3, min=1, max=33
+  Successfully ingested UnderDefense MAXI - Data retention and destruction policy.docx: 63 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Business continuity_Disaster recovery plan.docx
+  Parsing structure of UnderDefense MAXI - Business continuity_Disaster recovery plan.docx...
+  Chunking UnderDefense MAXI - Business continuity_Disaster recovery plan.docx with clause-level detection...
+  LLM returned invalid JSON: Extra data: line 2 column 1 (char 56)
+  LLM returned invalid JSON: Expecting ',' delimiter: line 1 column 125 (char 124)
+  Created 392 clause-level chunks from 32 sections
+  Token stats: avg=12.9, min=1, max=53
+  Successfully ingested UnderDefense MAXI - Business continuity_Disaster recovery plan.docx: 392 chunks, 9 entities
+
+Processing: UnderDefense MAXI - Human resource security policy.docx
+  Parsing structure of UnderDefense MAXI - Human resource security policy.docx...
+  Chunking UnderDefense MAXI - Human resource security policy.docx with clause-level detection...
+  Created 119 clause-level chunks from 16 sections
+  Token stats: avg=10.8, min=2, max=31
+  Successfully ingested UnderDefense MAXI - Human resource security policy.docx: 119 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Remote access policy.docx
+  Parsing structure of UnderDefense MAXI - Remote access policy.docx...
+  Chunking UnderDefense MAXI - Remote access policy.docx with clause-level detection...
+  Created 49 clause-level chunks from 11 sections
+  Token stats: avg=12.6, min=1, max=25
+  Successfully ingested UnderDefense MAXI - Remote access policy.docx: 49 chunks, 2 entities
+
+Processing: UnderDefense MAXI - Access management policy.docx
+  Parsing structure of UnderDefense MAXI - Access management policy.docx...
+  Chunking UnderDefense MAXI - Access management policy.docx with clause-level detection...
+  Created 82 clause-level chunks from 17 sections
+  Token stats: avg=12.5, min=3, max=47
+  Successfully ingested UnderDefense MAXI - Access management policy.docx: 82 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Password management policy.docx
+  Parsing structure of UnderDefense MAXI - Password management policy.docx...
+  Chunking UnderDefense MAXI - Password management policy.docx with clause-level detection...
+  LLM returned invalid JSON: Invalid \escape: line 1 column 75 (char 74)
+  Created 48 clause-level chunks from 15 sections
+  Token stats: avg=11.9, min=1, max=31
+  Successfully ingested UnderDefense MAXI - Password management policy.docx: 48 chunks, 6 entities
+
+Processing: UnderDefense MAXI - Software installation policy.docx
+  Parsing structure of UnderDefense MAXI - Software installation policy.docx...
+  Chunking UnderDefense MAXI - Software installation policy.docx with clause-level detection...
+  Created 68 clause-level chunks from 16 sections
+  Token stats: avg=12.8, min=2, max=39
+  Successfully ingested UnderDefense MAXI - Software installation policy.docx: 68 chunks, 3 entities
+
+Processing: UnderDefense MAXI - Backup policy.docx
+  Parsing structure of UnderDefense MAXI - Backup policy.docx...
+  Chunking UnderDefense MAXI - Backup policy.docx with clause-level detection...
+  Created 56 clause-level chunks from 15 sections
+  Token stats: avg=12.6, min=1, max=27
+  Successfully ingested UnderDefense MAXI - Backup policy.docx: 56 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Anti-virus_Anti-malware policy.docx
+  Parsing structure of UnderDefense MAXI - Anti-virus_Anti-malware policy.docx...
+  Chunking UnderDefense MAXI - Anti-virus_Anti-malware policy.docx with clause-level detection...
+  Created 70 clause-level chunks from 14 sections
+  Token stats: avg=10.8, min=1, max=25
+  Successfully ingested UnderDefense MAXI - Anti-virus_Anti-malware policy.docx: 70 chunks, 6 entities
+
+Processing: UnderDefense MAXI - Asset management policy.docx
+  Parsing structure of UnderDefense MAXI - Asset management policy.docx...
+  Chunking UnderDefense MAXI - Asset management policy.docx with clause-level detection...
+  LLM returned invalid JSON: Unterminated string starting at: line 1 column 2 (char 1)
+  Created 88 clause-level chunks from 17 sections
+  Token stats: avg=10.5, min=1, max=27
+  Successfully ingested UnderDefense MAXI - Asset management policy.docx: 88 chunks, 4 entities
+
+Processing: UnderDefense MAXI - Physical security policy.docx
+  Parsing structure of UnderDefense MAXI - Physical security policy.docx...
+  Chunking UnderDefense MAXI - Physical security policy.docx with clause-level detection...
+  Created 93 clause-level chunks from 14 sections
+  Token stats: avg=12.7, min=3, max=35
+  Successfully ingested UnderDefense MAXI - Physical security policy.docx: 93 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Risk management policy.docx
+  Parsing structure of UnderDefense MAXI - Risk management policy.docx...
+  Chunking UnderDefense MAXI - Risk management policy.docx with clause-level detection...
+  Created 133 clause-level chunks from 15 sections
+  Token stats: avg=7.9, min=1, max=30
+  Successfully ingested UnderDefense MAXI - Risk management policy.docx: 133 chunks, 4 entities
+
+Processing: UnderDefense MAXI - Log management policy.docx
+  Parsing structure of UnderDefense MAXI - Log management policy.docx...
+  Chunking UnderDefense MAXI - Log management policy.docx with clause-level detection...
+  Created 87 clause-level chunks from 15 sections
+  Token stats: avg=9.5, min=1, max=24
+  Successfully ingested UnderDefense MAXI - Log management policy.docx: 87 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Change management policy.docx
+  Parsing structure of UnderDefense MAXI - Change management policy.docx...
+  Chunking UnderDefense MAXI - Change management policy.docx with clause-level detection...
+  Created 139 clause-level chunks from 16 sections
+  Token stats: avg=12.6, min=2, max=48
+  Successfully ingested UnderDefense MAXI - Change management policy.docx: 139 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Incident response plan.docx
+  Parsing structure of UnderDefense MAXI - Incident response plan.docx...
+  Chunking UnderDefense MAXI - Incident response plan.docx with clause-level detection...
+  LLM returned invalid JSON: Expecting ':' delimiter: line 1 column 60 (char 59)
+  LLM returned invalid JSON: Extra data: line 2 column 1 (char 60)
+  LLM returned invalid JSON: Expecting ':' delimiter: line 1 column 39 (char 38)
+  Created 233 clause-level chunks from 22 sections
+  Token stats: avg=11.1, min=1, max=38
+  Successfully ingested UnderDefense MAXI - Incident response plan.docx: 233 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Clear desk and screen policy.docx
+  Parsing structure of UnderDefense MAXI - Clear desk and screen policy.docx...
+  Chunking UnderDefense MAXI - Clear desk and screen policy.docx with clause-level detection...
+  Created 43 clause-level chunks from 11 sections
+  Token stats: avg=14.6, min=3, max=35
+  Successfully ingested UnderDefense MAXI - Clear desk and screen policy.docx: 43 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Bring your own device policy.docx
+  Parsing structure of UnderDefense MAXI - Bring your own device policy.docx...
+  Chunking UnderDefense MAXI - Bring your own device policy.docx with clause-level detection...
+  Created 62 clause-level chunks from 11 sections
+  Token stats: avg=12.4, min=1, max=33
+  Successfully ingested UnderDefense MAXI - Bring your own device policy.docx: 62 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Removable media policy.docx
+  Parsing structure of UnderDefense MAXI - Removable media policy.docx...
+  Chunking UnderDefense MAXI - Removable media policy.docx with clause-level detection...
+  LLM returned invalid JSON: Extra data: line 2 column 1 (char 65)
+  Created 19 clause-level chunks from 9 sections
+  Token stats: avg=14.5, min=3, max=36
+  Successfully ingested UnderDefense MAXI - Removable media policy.docx: 19 chunks, 2 entities
+
+Processing: UnderDefense MAXI - Information security policy.docx
+  Parsing structure of UnderDefense MAXI - Information security policy.docx...
+  Chunking UnderDefense MAXI - Information security policy.docx with clause-level detection...
+  Created 66 clause-level chunks from 14 sections
+  Token stats: avg=12.7, min=3, max=46
+  Successfully ingested UnderDefense MAXI - Information security policy.docx: 66 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Supplier security policy.docx
+  Parsing structure of UnderDefense MAXI - Supplier security policy.docx...
+  Chunking UnderDefense MAXI - Supplier security policy.docx with clause-level detection...
+  Created 51 clause-level chunks from 17 sections
+  Token stats: avg=11.7, min=1, max=27
+  Successfully ingested UnderDefense MAXI - Supplier security policy.docx: 51 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Patch management policy.docx
+  Parsing structure of UnderDefense MAXI - Patch management policy.docx...
+  Chunking UnderDefense MAXI - Patch management policy.docx with clause-level detection...
+  Created 56 clause-level chunks from 13 sections
+  Token stats: avg=12.1, min=2, max=31
+  Successfully ingested UnderDefense MAXI - Patch management policy.docx: 56 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Vulnerability management policy.docx
+  Parsing structure of UnderDefense MAXI - Vulnerability management policy.docx...
+  Chunking UnderDefense MAXI - Vulnerability management policy.docx with clause-level detection...
+  Created 64 clause-level chunks from 16 sections
+  Token stats: avg=13.5, min=2, max=31
+  Successfully ingested UnderDefense MAXI - Vulnerability management policy.docx: 64 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Physical media transfer policy.docx
+  Parsing structure of UnderDefense MAXI - Physical media transfer policy.docx...
+  Chunking UnderDefense MAXI - Physical media transfer policy.docx with clause-level detection...
+  Created 54 clause-level chunks from 14 sections
+  Token stats: avg=13.5, min=2, max=45
+  Successfully ingested UnderDefense MAXI - Physical media transfer policy.docx: 54 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Encryption policy.docx
+  Parsing structure of UnderDefense MAXI - Encryption policy.docx...
+  Chunking UnderDefense MAXI - Encryption policy.docx with clause-level detection...
+  Created 48 clause-level chunks from 12 sections
+  Token stats: avg=10.6, min=2, max=26
+  Successfully ingested UnderDefense MAXI - Encryption policy.docx: 48 chunks, 5 entities
+
+Processing: UnderDefense MAXI - Network security policy.docx
+  Parsing structure of UnderDefense MAXI - Network security policy.docx...
+  Chunking UnderDefense MAXI - Network security policy.docx with clause-level detection...
+  Created 51 clause-level chunks from 13 sections
+  Token stats: avg=13.1, min=3, max=25
+  Successfully ingested UnderDefense MAXI - Network security policy.docx: 51 chunks, 5 entities
+
+Ingestion process complete.
