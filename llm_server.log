@@ -1,0 +1,6 @@
+--------------------------------------------------------
+Starting Codex Clause Detection Server (Phi-4-mini)...
+Model: /home/mujtaba/models/Phi-4-mini-instruct-Q4_K_M.gguf
+Port: 8080
+GPU Layers: 33
+--------------------------------------------------------

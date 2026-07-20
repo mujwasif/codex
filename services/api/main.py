@@ -43,11 +43,22 @@ MOCK_USERS = {
 @app.on_event("startup")
 async def startup_event():
     global bm25_index
+
+    # Initialize connection pool for tool calling
+    from services.agents.tools.connections import ConnectionPool
+    ConnectionPool.initialize()
+
     try:
         bm25_index = BM25Index()
         print(f"✓ BM25 index loaded: {bm25_index.chunk_count} chunks")
     except Exception as e:
         print(f"⚠️ BM25 index failed to load: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    from services.agents.tools.connections import ConnectionPool
+    ConnectionPool.close()
 
 
 # ============ Audit Logging Middleware ============
@@ -175,11 +186,12 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 @app.post("/query", response_model=AnswerResponse)
 async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get_current_active_user)):
     """
-    Process a policy query with full logging and citation tracking.
+    Process a policy query through the state machine orchestrator.
+    Routes to specialized agents based on intent classification.
     """
     username = current_user.get("username")
     level = current_user.get("access_level", 1)
-    start_time = time.time()
+    department = MOCK_USERS.get(username, {}).get("department", "Unknown")
 
     # 1. Log the query
     query_id = uuid.uuid4()
@@ -189,7 +201,7 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
                 id=query_id,
                 user_id=username,
                 role=f"level_{level}",
-                dept=MOCK_USERS.get(username, {}).get("department", "Unknown"),
+                dept=department,
                 question=query_data.question,
                 intent=query_data.intent
             )
@@ -198,41 +210,27 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
     except Exception as e:
         print(f"⚠️ Query logging failed: {e}")
 
-    # 2. Retrieve and Rerank
+    # 2. Run through state machine orchestrator
+    from services.agents.orchestrator import run_pipeline, QueryState
+
     search_mode = query_data.search_mode or "hybrid"
-    chunks = search_policy(
-        query_data.question,
+    ctx = run_pipeline(
+        question=query_data.question,
+        user_id=username,
         access_level=level,
+        department=department,
         search_mode=search_mode,
-        bm25_index=bm25_index,
     )
 
-    # 3. Generate Grounded Answer
-    answer_text = generate_grounded_answer(query_data.question, chunks)
+    # 3. Extract results from context
+    answer_text = ctx.answer
+    verdict = ctx.verdict
+    confidence = ctx.confidence
+    latency_ms = ctx.latency_ms
+    chunks = ctx.chunks
+    abstained = ctx.state == QueryState.ABSTAINED
 
-    # 4. Verify Grounding
-    is_valid, msg = verify_citations(answer_text, chunks)
-
-    # 5. Calculate latency
-    latency_ms = int((time.time() - start_time) * 1000)
-
-    # 6. Determine verdict
-    confidence = compute_confidence(chunks, is_valid, answer_text)
-
-    if not is_valid:
-        verdict = "abstained"
-        abstained = True
-    elif "Insufficient" in answer_text:
-        verdict = "abstained"
-        abstained = True
-    else:
-        verdict = "clear"
-        abstained = False
-    
-    # Note: confidence is now computed as a percentage (0-100)
-    # regardless of whether the answer is clear or abstained.
-
-    # 7. Log the answer
+    # 4. Log the answer
     answer_id = uuid.uuid4()
     try:
         with get_db_session() as session:
@@ -263,14 +261,15 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
     except Exception as e:
         print(f"⚠️ Answer logging failed: {e}")
 
-    # 8. Log audit action
+    # 5. Log audit action
     log_audit_action(username, "query", {
         "question": query_data.question[:100],
         "verdict": verdict,
-        "confidence": confidence
+        "confidence": confidence,
+        "intent": ctx.intent.value,
     })
 
-    # 9. Build response
+    # 6. Build response
     citations_response = [
         CitationResponse(
             id=str(uuid.uuid4()),

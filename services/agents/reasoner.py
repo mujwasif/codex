@@ -1,7 +1,11 @@
-import requests
+"""
+Policy Reasoner Agent
 
-# llama.cpp server configuration
-LLAMA_URL = "http://localhost:8080/v1/chat/completions"
+Generates grounded answers from retrieved clauses using DeepSeek-R1.
+Enforces cite-or-abstain invariant.
+"""
+
+from services.agents.tools.llm_tools import llm_generate, DEEPSEEK_MODEL
 
 SYSTEM_PROMPT = """
 You are the Codex Policy Intelligence Engine. Your goal is to provide grounded, cited answers based ONLY on the provided context.
@@ -14,30 +18,36 @@ STRICT RULES:
 5. Do not apologize or explain your reasoning; provide only the final grounded answer.
 """
 
+
 def generate_grounded_answer(query, context_chunks):
+    """
+    Generate a grounded answer from retrieved clauses.
+    
+    Args:
+        query: User's question
+        context_chunks: List of chunk dicts with 'title', 'clause_ref', 'text'
+        
+    Returns:
+        Answer string with bracketed citations
+    """
     # Format the retrieved chunks into a readable block for the LLM
     context_text = "\n\n".join([
-        f"[Doc: {c['title']}, Clause: {c.get('clause_ref', 'N/A')}]: {c['text']}" 
+        f"[Doc: {c['title']}, Clause: {c.get('clause_ref', 'N/A')}]: {c['text']}"
         for c in context_chunks
     ])
-    
-    # Construct the message sequence for Chat Completion API
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"Context:\n{context_text}\n\nQuestion: {query}"}
-    ]
-    
-    payload = {
-        "model": "deepseek-r1-distill-llama-8b",
-        "messages": messages,
-        "temperature": 0.0,
-        "stream": False
-    }
-    
-    try:
-        response = requests.post(LLAMA_URL, json=payload, timeout=120)
-        response.raise_for_status()
-        result = response.json()
-        return result['choices'][0]['message']['content'].strip()
-    except Exception as e:
-        return f"Error connecting to llama.cpp server: {str(e)}"
+
+    user_message = f"Context:\n{context_text}\n\nQuestion: {query}"
+
+    result = llm_generate(
+        model=DEEPSEEK_MODEL,
+        system_prompt=SYSTEM_PROMPT,
+        user_message=user_message,
+        temperature=0.0,
+        max_tokens=2048,
+        timeout=120.0
+    )
+
+    if result.success:
+        return result.data
+    else:
+        return f"Error connecting to llama.cpp server: {result.error}"
