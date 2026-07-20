@@ -68,7 +68,7 @@ def vector_search(query: str, access_level: int, top_k: int = 20) -> List[Dict]:
             WHERE d.status = 'active'
             ORDER BY c.embedding <=> CAST(:embedding AS vector)
             LIMIT :limit
-        """)
+        """) 
 
         result = session.execute(sql, {
             "embedding": str(query_vector),

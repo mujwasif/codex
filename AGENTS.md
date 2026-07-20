@@ -389,12 +389,17 @@ RETURN c.obligation
 | Gap | Priority | Impact |
 |-----|----------|--------|
 | No `.gitignore` | High | __pycache__ and logs tracked in git |
-| `main.py` too large (~694 lines) | High | Should be split into FastAPI routers |
+| No `README.md` | High | No project documentation |
+| `main.py` too large (~705 lines) | High | Should be split into FastAPI routers |
+| Answer payload missing reasoning/next_steps/missing fields | Medium | Incomplete API response |
+| Verdict "conditional"/"violation" not surfaced to API | Medium | Risk agent computes but orchestrator overwrites |
+| Intent classification has no LLM fallback | Medium | Keyword-only misses ambiguous queries |
+| kg_extractor.py uses direct requests.post() | Low | Should use llm_generate tool |
+| clause_detector.py uses direct requests.post() | Low | Should use llm_generate tool |
 | No POST /ingest endpoint | Medium | Can't upload documents via API |
 | Thin test coverage | Medium | No tests for search, BM25, auth, doc_parser |
 | No OCR support | Low | Scanned PDFs produce no text |
 | No web UI | Low | CLI-only interface |
-| No retry/error handling on LLM calls | Medium | LLM failures crash individual agents |
 | No rate limiting | Low | API vulnerable to abuse |
 | Mock user store (not Postgres) | Low | Users reset on restart |
 | No CONFLICTS_WITH in Neo4j | Low | Skipped (too expensive for 1,842 clauses) |

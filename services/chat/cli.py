@@ -9,7 +9,7 @@ def login(username, password):
     try:
         response = requests.post(
             f"{API_BASE_URL}/login",
-            json={"username": username, "password": password}
+            data={"username": username, "password": password}
         )
         response.raise_for_status()
         data = response.json()
