@@ -27,7 +27,7 @@ app = FastAPI(title="Codex Policy Intelligence Engine", version="0.1.0")
 outh2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
 # Global BM25 index
-bm25_index = None
+bm25_index = None #import BM25Index and initialize in startup event need to understand further why
 
 # MOCK USER DATABASE for MVP (Normally in Postgres)
 # Passwords are hashed with argon2 at startup (via hashward CryptContext)

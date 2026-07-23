@@ -11,6 +11,7 @@ Maps to regulations and provides risk assessment.
 
 from typing import Dict, Any, List
 from services.agents.tools.neo4j_tools import neo4j_query
+from services.agents.tools.llm_tools import llm_generate, PHI_MODEL
 
 
 def _get_regulations_for_chunks(chunks: List[Dict[str, Any]]) -> List[str]:
@@ -51,20 +52,37 @@ def _get_clause_obligations(chunks: List[Dict[str, Any]]) -> Dict[str, str]:
     return obligations
 
 
-def _classify_by_keywords(question: str, chunks: List[Dict[str, Any]]) -> str:
-    """Simple keyword-based risk classification."""
-    q = question.lower()
-    all_text = " ".join((c.get("text", "") or "").lower() for c in chunks)
+def _classify_by_llm(question: str, chunks: List[Dict[str, Any]]) -> str:
+    context_text = "\n\n".join([
+        f"[Clause {c.get('clause_ref', 'N/A')}]: {(c.get('text') or '')[:500]}"
+        for c in chunks[:3]
+    ])
+    prompt = f"""Given the user's question and policy context below, classify compliance risk as one word: "clear", "conditional", or "violation".
 
-    # Clear indicators
-    violation_kw = ["violation", "breach", "non-compliant", "penalty", "fine", "sanction"]
-    if any(kw in q for kw in violation_kw) or any(kw in all_text[:500] for kw in violation_kw):
-        return "violation"
+- clear: No compliance issues, following policy
+- conditional: Compliance depends on meeting conditions
+- violation: Policy or regulation is being breached
 
-    conditional_kw = ["depends on", "conditional", "subject to", "requires approval", "if then"]
-    if any(kw in q for kw in conditional_kw) or any(kw in all_text[:500] for kw in conditional_kw):
-        return "conditional"
+Question: {question}
 
+Context:
+{context_text}
+
+Answer with one word:"""
+
+    result = llm_generate(
+        model=PHI_MODEL,
+        system_prompt="You are a compliance classifier. Output only one word: clear, conditional, or violation.",
+        user_message=prompt,
+        temperature=0.0,
+        max_tokens=10,
+        timeout=15.0
+    )
+
+    if result.success:
+        verdict = (result.data or "").strip().lower()
+        if verdict in ("clear", "conditional", "violation"):
+            return verdict
     return "clear"
 
 
@@ -100,7 +118,7 @@ def assess_risk(
     obligations = _get_clause_obligations(chunks)
 
     # Classify verdict
-    verdict = _classify_by_keywords(question, chunks)
+    verdict = _classify_by_llm(question, chunks)
 
     # Determine risk level
     mandatory_count = sum(1 for v in obligations.values() if v == "mandatory")
