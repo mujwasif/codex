@@ -1,0 +1,13 @@
+{
+    "Servers": {
+        "1": {
+            "Name": "Codex PostgreSQL (local)",
+            "Group": "Servers",
+            "Host": "127.0.0.1",
+            "Port": 5432,
+            "MaintenanceDB": "postgres",
+            "Username": "mujtaba",
+            "Comment": "trust auth, no password"
+        }
+    }
+}

@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+.git
+*.md
+*.docx
+*.docx:Zone.Identifier
+archive/
+new_policies/
+models/
+logs/
+.opencode/
+*.log
+.DS_Store
+.env*
+!.env.example

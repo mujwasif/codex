@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Environment
+.env
+.env.local
+*.env
+
+# Logs
+*.log
+logs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Windows metadata (junk on Linux)
+*.Zone.Identifier
+*:Zone.Identifier
+
+# Neo4j migration tracking
+processed_docs.txt
+
+# Databases / temp
+*.db
+*.sqlite3
+
+# Empty placeholder dirs that get committed accidentally
+init.sql/
+eval/

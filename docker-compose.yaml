@@ -1,0 +1,125 @@
+version: '3.8'
+
+services:
+  # 1. PostgreSQL with pgvector
+  db:
+    image: ankane/pgvector:latest
+    container_name: codex-db
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./codex/infra/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  # 2. Neo4j Graph Database
+  graph:
+    image: neo4j:5.26.0-community
+    container_name: codex-graph
+    restart: always
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH}
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+
+  # 3. LLM Servers (llama.cpp) — only needs llama-server binary, no Python packages
+  llm-server:
+    build: 
+      context: /home/mujtaba/new_folder
+      dockerfile: codex/Dockerfile
+    container_name: codex-llm
+    restart: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - /home/mujtaba/models:/models
+    command: >
+      bash -c "
+      /usr/local/bin/llama-server -m /models/Qwen3-8B-Q4_K_M.gguf --host 0.0.0.0 --port 8080 --n-gpu-layers 30 --ctx-size 16384 --flash-attn on --reasoning-format deepseek &
+      /usr/local/bin/llama-server -m /models/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf --host 0.0.0.0 --port 8081 --n-gpu-layers 10 --ctx-size 16384 --flash-attn on --reasoning off &
+      tail -f /dev/null"
+
+  # 4. FastAPI Core API
+  api:
+    build: 
+      context: /home/mujtaba/new_folder
+      dockerfile: codex/Dockerfile
+    container_name: codex-api
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - NEO4J_URI=bolt://graph:7687
+      - LLAMA_8B_URL=http://llm-server:8080
+      - LLAMA_4B_URL=http://llm-server:8081
+      - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - CODEX_API_URL=${CODEX_API_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - PYTHONPATH=${PYTHONPATH}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - graph
+      - llm-server
+    volumes:
+      - /home/mujtaba/new_folder/codex:/app/codex
+      - /home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages:/usr/local/lib/python3.12/site-packages:ro
+    command: python3 -m uvicorn codex.services.api.main:app --host 0.0.0.0 --port 8000
+
+  # 5. Streamlit UI
+  ui:
+    build: 
+      context: /home/mujtaba/new_folder
+      dockerfile: codex/Dockerfile
+    container_name: codex-ui
+    restart: always
+    environment:
+      - CODEX_API_URL=http://api:8000
+      - PYTHONPATH=${PYTHONPATH}
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    command: python3 -m streamlit run codex/services/chat/ui.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
+    volumes:
+      - /home/mujtaba/new_folder/codex:/app/codex
+      - /home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages:/usr/local/lib/python3.12/site-packages:ro
+
+  # 6. Ingestion Worker
+  worker:
+    build: 
+      context: /home/mujtaba/new_folder
+      dockerfile: codex/Dockerfile
+    container_name: codex-worker
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - NEO4J_URI=bolt://graph:7687
+      - LLAMA_8B_URL=http://llm-server:8080
+      - LLAMA_4B_URL=http://llm-server:8081
+      - PYTHONPATH=${PYTHONPATH}
+    depends_on:
+      - db
+      - graph
+      - llm-server
+    command: python3 -m codex.services.ingestion.ingestion_agent
+    volumes:
+      - /home/mujtaba/new_folder/codex:/app/codex
+      - /home/mujtaba/new_folder/fastmcp/venv/lib/python3.12/site-packages:/usr/local/lib/python3.12/site-packages:ro
+
+volumes:
+  pgdata:
+  neo4j_data:
