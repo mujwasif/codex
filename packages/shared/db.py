@@ -2,13 +2,12 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from contextlib import contextmanager
-from packages.shared.config import DATABASE_URL
+from packages.shared.config import DATABASE_URL, DB_POOL_SIZE, DB_MAX_OVERFLOW
 
-# Create engine with PostgreSQL settings
 engine = create_engine(
     DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=DB_POOL_SIZE,
+    max_overflow=DB_MAX_OVERFLOW,
     pool_pre_ping=True,
     echo=False
 )

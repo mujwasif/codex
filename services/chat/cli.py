@@ -1,7 +1,8 @@
+import os
 import requests
 import sys
 
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = os.getenv("CODEX_API_URL", "http://localhost:8000")
 
 
 def login(username, password):

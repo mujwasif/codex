@@ -7,16 +7,18 @@ The app is assembled here; endpoint logic lives in the routers package
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import json
 
 from codex.services.ingestion.bm25_index import BM25Index
 from codex.services.api.routers import include_routers
 from services.api import state
+from packages.shared.config import CORS_ORIGINS
 
 app = FastAPI(title="Codex Policy Intelligence Engine", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8501", "http://127.0.0.1:8501"],
+    allow_origins=json.loads(CORS_ORIGINS),
     allow_methods=["*"],
     allow_headers=["*"],
 )

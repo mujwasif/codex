@@ -2,11 +2,7 @@ import os
 from datetime import datetime, timedelta
 from jose import jwt
 from hashward import CryptContext
-
-# In production, set these via environment variables!
-SECRET_KEY = os.getenv("SECRET_KEY", "change-this-to-a-random-secure-string")
-ALGORITHM = "HS256"
-TOKEN_EXPIRE_MINUTES = 30
+from packages.shared.config import SECRET_KEY, ALGORITHM, TOKEN_EXPIRE_MINUTES
 
 # Password hashing context - uses argon2 by default, supports bcrypt fallback
 pwd_context = CryptContext(

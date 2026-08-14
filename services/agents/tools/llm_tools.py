@@ -11,13 +11,9 @@ import json
 from typing import Optional
 from services.agents.tools.base import ToolResult, tool
 from services.agents.tools.connections import ConnectionPool
+from packages.shared.config import QWEN3_8B_MODEL, QWEN3_4B_MODEL
 
-# Model constants
-QWEN3_8B_MODEL = "Qwen3-8B-Q4_K_M.gguf"
-QWEN3_MODEL = "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf"
-
-# Models served by the always-on 8081 llama-server (clause detection, classification, graph gen)
-AGENT_8081_MODELS = {QWEN3_MODEL.lower()}
+AGENT_8081_MODELS = {QWEN3_4B_MODEL.lower()}
 
 
 @tool(name="llm_generate", failure_threshold=3)

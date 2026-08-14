@@ -34,7 +34,7 @@ from services.agents.tools.llm_tools import (
     llm_generate,
     llm_generate_json,
     QWEN3_8B_MODEL,
-    QWEN3_MODEL,
+    QWEN3_4B_MODEL,
 )
 
 __all__ = [
@@ -49,5 +49,5 @@ __all__ = [
     "llm_generate",
     "llm_generate_json",
     "QWEN3_8B_MODEL",
-    "QWEN3_MODEL",
+    "QWEN3_4B_MODEL",
 ]

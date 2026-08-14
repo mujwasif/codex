@@ -1,7 +1,7 @@
 import re
 import json
 from typing import List, Optional
-from services.agents.tools.llm_tools import llm_generate, QWEN3_MODEL
+from services.agents.tools.llm_tools import llm_generate, QWEN3_4B_MODEL
 from packages.shared.chunk_filter import is_low_info, PROMPT_LEAK_MARKERS
 
 # Chain-of-thought workflow appended to the clause-detection prompt.
@@ -142,7 +142,7 @@ TEXT:
 {_COT_RULE}"""
 
     result = llm_generate(
-        model=QWEN3_MODEL,
+        model=QWEN3_4B_MODEL,
         system_prompt="You are a policy document parser. Reason step-by-step about rule boundaries, then output a JSON array of clause strings wrapped in a ```json fenced block.",
         user_message=prompt,
         temperature=0.0,
