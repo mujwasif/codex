@@ -70,10 +70,10 @@ Choose one mode:
 #### Option A: Local (recommended for development)
 
 ```bash
-bash infra/start_local.sh
+bash infra/start_codex.sh
 ```
 
-Starts all 8 services directly on your machine: PostgreSQL, Neo4j, Qwen3-8B, Qwen3-4B, pgAdmin4, FastAPI, Streamlit UI, Ingestion Worker.
+Starts all 8 services directly on your machine: PostgreSQL, Neo4j, Qwen3-8B, Qwen3-4B, pgAdmin4, FastAPI, Streamlit UI, Ingestion Worker. Automatically stops any conflicting Docker containers first.
 
 #### Option B: Docker
 
@@ -86,7 +86,15 @@ Starts all 6 containers: PostgreSQL, Neo4j, LLM Server (8B+4B), FastAPI, Streaml
 #### Stop Everything
 
 ```bash
-bash infra/stop.sh
+# Docker
+docker compose down
+
+# Local — kill processes on known ports
+for port in 8000 8080 8081 8501 5050; do
+  pid=$(lsof -t -i:"$port" 2>/dev/null || true)
+  [ -n "$pid" ] && kill "$pid" 2>/dev/null
+done
+pkill -f "uvicorn|streamlit|ingestion_agent|pgadmin4" 2>/dev/null || true
 ```
 
 ### 4. Verify
@@ -386,7 +394,7 @@ codex/
 ├── packages/
 │   └── shared/            # Models, schemas, db, auth, config, doc_parser, confidence
 ├── archive/               # Source policy documents (drop .docx/.pdf here)
-├── infra/                 # Startup scripts, DB init, migration tools
+├── infra/                 # Startup scripts, DB init, migration tools, unused/archived scripts
 ├── tests/                 # Test suites
 ├── doc/                   # Architecture documentation
 ├── .env.example           # Environment variable template (50+ variables)
@@ -438,13 +446,13 @@ bash infra/reset_and_reingest.sh
 bash infra/run_graph_migration.sh
 
 # Start everything locally
-bash infra/start_local.sh
+bash infra/start_codex.sh
 
 # Start everything via Docker
 bash infra/start_docker.sh
 
-# Stop everything
-bash infra/stop.sh
+# Stop everything (Docker)
+docker compose down
 
 # Refresh BM25 index after ingestion
 curl -X POST http://localhost:8000/admin/refresh-index \

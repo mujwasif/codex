@@ -16,7 +16,7 @@ echo "========================================================"
 
 # Step 1: Kill ALL llama-server processes to clear VRAM
 echo ""
-echo "[1/8] Clearing VRAM: Killing all llama-server instances..."
+echo "[1/10] Clearing VRAM: Killing all llama-server instances..."
 PIDS=$(lsof -t -i:8080,8081 2>/dev/null)
 if [ -n "$PIDS" ]; then
     kill -9 $PIDS 2>/dev/null

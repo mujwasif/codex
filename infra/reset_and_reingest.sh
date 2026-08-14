@@ -81,7 +81,7 @@ psql -U codex_admin -d codex_db -c "TRUNCATE TABLE documents, chunks, entities, 
 echo "  SQL data wiped."
 
 echo "[4/7] Purging Neo4j knowledge graph..."
-cypher-shell -u neo4j -p "securepassword123" "MATCH (n) DETACH DELETE n" || echo "  Neo4j purge failed (check password)"
+cypher-shell -u neo4j -p "${NEO4J_PASS:-securepassword123}" "MATCH (n) DETACH DELETE n" || echo "  Neo4j purge failed (check password)"
 echo "  Graph wiped."
 
 echo "[5/7] Resetting state files..."
