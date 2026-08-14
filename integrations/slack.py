@@ -170,12 +170,22 @@ class SlackIntegration(ChatIntegration):
     # ── Codex API interaction ──────────────────────────────────────────
 
     def _get_user(self, username: str) -> Optional[dict]:
-        """Resolve a user dict from the injected store or the shared MOCK_USERS."""
+        """Resolve a user dict from the injected store or the PostgreSQL database."""
         if self.user_store is not None:
             return self.user_store.get(username)
         try:
-            from services.api.dependencies import MOCK_USERS
-            return MOCK_USERS.get(username)
+            from codex.packages.shared.db import get_db_session
+            from codex.packages.shared.models import User
+            with get_db_session() as session:
+                user = session.query(User).filter(User.username == username).first()
+                if not user:
+                    return None
+                return {
+                    "username": user.username,
+                    "department": user.department,
+                    "access_level": user.access_level,
+                    "is_active": user.is_active,
+                }
         except Exception as e:
             print(f"⚠️ Slack user store unavailable: {e}")
             return None

@@ -101,6 +101,18 @@ CREATE TABLE IF NOT EXISTS audit_log (
     ts TIMESTAMP DEFAULT NOW()
 );
 
+-- users: Authentication and RBAC
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(100) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    department VARCHAR(100) NOT NULL,
+    access_level INTEGER NOT NULL DEFAULT 1 CHECK (access_level BETWEEN 1 AND 3),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_chunks_document_id ON chunks(document_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_clause_ref ON chunks(clause_ref);
@@ -118,6 +130,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor);
 CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action);
 CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON audit_log(ts);
 CREATE INDEX IF NOT EXISTS idx_documents_access_level ON documents(access_level);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 
 -- Vector index for similarity search (IVFFlat)
 -- Note: This index requires data to be present. Run after ingestion.

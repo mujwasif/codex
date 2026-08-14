@@ -77,6 +77,109 @@ def delete_policy(token, document_id):
         return None
 
 
+def fetch_users(token):
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/users",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to fetch users: {e}")
+        return []
+
+
+def create_user(token, data):
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/users",
+            json=data,
+            headers=headers,
+            timeout=10,
+        )
+        if response.status_code == 400:
+            detail = response.json().get("detail", "Username already exists")
+            st.error(detail)
+            return None
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to create user: {e}")
+        return None
+
+
+def update_user(token, user_id, data):
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = requests.patch(
+            f"{API_BASE_URL}/users/{user_id}",
+            json=data,
+            headers=headers,
+            timeout=10,
+        )
+        if response.status_code == 404:
+            st.error("User not found.")
+            return None
+        if response.status_code == 400:
+            detail = response.json().get("detail", "No fields to update")
+            st.error(detail)
+            return None
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to update user: {e}")
+        return None
+
+
+def delete_user_api(token, user_id):
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = requests.delete(
+            f"{API_BASE_URL}/users/{user_id}",
+            headers=headers,
+            timeout=10,
+        )
+        if response.status_code == 404:
+            st.error("User not found.")
+            return None
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to delete user: {e}")
+        return None
+
+
+def fetch_documents(token):
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/documents",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to fetch documents: {e}")
+        return []
+
+
+def fetch_document_detail(token, doc_id):
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/documents/{doc_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to fetch document detail: {e}")
+        return None
+
+
 INGESTION_STAGES = ["pending", "processing", "chunks_ready", "graph_building", "ready", "failed"]
 
 
@@ -200,6 +303,218 @@ def render_ingestion_tab(token):
     with st.spinner("Loading ingestion status..."):
         status_data = fetch_ingestion_status(token)
     render_ingestion_status_panel(status_data, token)
+
+
+def render_users_tab(token):
+    st.subheader("User Management")
+    st.caption("Admin workspace. Create, edit, and delete users. New users default to Employee access level.")
+
+    # --- Add new user form ---
+    st.markdown("#### Add New User")
+    with st.form("create_user_form", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        with col1:
+            new_username = st.text_input("Username", key="new_user_name")
+            new_password = st.text_input("Password", type="password", key="new_user_pass")
+        with col2:
+            new_department = st.text_input("Department", key="new_user_dept")
+            new_access = st.selectbox(
+                "Access Level",
+                options=[1, 2, 3],
+                format_func=lambda x: {1: "1 - Employee", 2: "2 - Manager", 3: "3 - Admin"}[x],
+                key="new_user_level",
+            )
+        create_clicked = st.form_submit_button("Create User", type="primary")
+
+    if create_clicked:
+        if not new_username or not new_password or not new_department:
+            st.error("All fields are required.")
+        else:
+            result = create_user(token, {
+                "username": new_username,
+                "password": new_password,
+                "department": new_department,
+                "access_level": new_access,
+            })
+            if result:
+                st.success(f"User '{result['username']}' created.")
+                st.rerun()
+
+    st.divider()
+
+    # --- User list ---
+    st.markdown("#### All Users")
+    with st.spinner("Loading users..."):
+        users = fetch_users(token)
+
+    if not users:
+        st.info("No users found.")
+        return
+
+    # Render table
+    header_cols = st.columns([2, 2, 1, 1, 2, 2])
+    headers = ["Username", "Department", "Level", "Active", "Created", "Actions"]
+    for col, h in zip(header_cols, headers):
+        with col:
+            st.markdown(f"**{h}**")
+
+    for user in users:
+        uid = user["id"]
+        level_label = {1: "Employee", 2: "Manager", 3: "Admin"}.get(user["access_level"], "?")
+        active_badge = "Yes" if user["is_active"] else "No"
+        created = (user.get("created_at") or "")[:10]
+
+        row_cols = st.columns([2, 2, 1, 1, 2, 2])
+        with row_cols[0]:
+            st.write(user["username"])
+        with row_cols[1]:
+            st.write(user["department"])
+        with row_cols[2]:
+            st.write(level_label)
+        with row_cols[3]:
+            st.write(active_badge)
+        with row_cols[4]:
+            st.write(created)
+        with row_cols[5]:
+            edit_key = f"edit_{uid}"
+            delete_key = f"delete_{uid}"
+            e1, e2 = st.columns(2)
+            with e1:
+                if st.button("Edit", key=edit_key, use_container_width=True):
+                    st.session_state[f"editing_{uid}"] = True
+            with e2:
+                if st.button("Delete", key=delete_key, use_container_width=True, type="secondary"):
+                    st.session_state[f"deleting_{uid}"] = True
+
+        # --- Inline edit form ---
+        if st.session_state.get(f"editing_{uid}"):
+            with st.expander(f"Edit {user['username']}", expanded=True):
+                with st.form(f"edit_form_{uid}"):
+                    edit_dept = st.text_input("Department", value=user["department"])
+                    edit_level = st.selectbox(
+                        "Access Level",
+                        options=[1, 2, 3],
+                        index=user["access_level"] - 1,
+                        format_func=lambda x: {1: "1 - Employee", 2: "2 - Manager", 3: "3 - Admin"}[x],
+                    )
+                    fc1, fc2 = st.columns(2)
+                    with fc1:
+                        save_clicked = st.form_submit_button("Save Changes", type="primary")
+                    with fc2:
+                        cancel_clicked = st.form_submit_button("Cancel")
+
+                if save_clicked:
+                    result = update_user(token, uid, {
+                        "department": edit_dept,
+                        "access_level": edit_level,
+                    })
+                    if result:
+                        st.success(f"User '{result['username']}' updated.")
+                        st.session_state[f"editing_{uid}"] = False
+                        st.rerun()
+                if cancel_clicked:
+                    st.session_state[f"editing_{uid}"] = False
+                    st.rerun()
+
+        # --- Inline delete confirmation ---
+        if st.session_state.get(f"deleting_{uid}"):
+            st.warning(f"Are you sure you want to permanently delete **{user['username']}**?")
+            dc1, dc2 = st.columns(2)
+            with dc1:
+                if st.button("Confirm Delete", key=f"confirm_del_{uid}", type="primary"):
+                    result = delete_user_api(token, uid)
+                    if result:
+                        st.success(f"User '{result['username']}' deleted.")
+                        st.session_state[f"deleting_{uid}"] = False
+                        st.rerun()
+            with dc2:
+                if st.button("Cancel Delete", key=f"cancel_del_{uid}"):
+                    st.session_state[f"deleting_{uid}"] = False
+                    st.rerun()
+
+
+def render_documents_tab(token):
+    st.subheader("Documents & Chunks")
+    st.caption("Browse ingested policy documents and their chunked content.")
+
+    with st.spinner("Loading documents..."):
+        documents = fetch_documents(token)
+
+    if not documents:
+        st.info("No documents found. Upload documents in the Ingestion tab.")
+        return
+
+    # Search bar
+    search_query = st.text_input("Search chunks by text...", key="doc_search", placeholder="e.g. password policy")
+
+    # Document list
+    st.markdown("#### Documents")
+
+    for doc in documents:
+        doc_id = doc["id"]
+        status = doc.get("status", "unknown")
+        chunk_count = doc.get("chunk_count", 0)
+        entity_count = doc.get("entity_count", 0)
+
+        tone = "verdict-clear" if status == "active" else "verdict-abstained" if status == "failed" else "verdict-conditional"
+
+        col1, col2, col3, col4 = st.columns([4, 1, 1, 1])
+        with col1:
+            st.markdown(f"**{doc['title']}**")
+        with col2:
+            st.markdown(f'<span class="verdict-box {tone}">{status}</span>', unsafe_allow_html=True)
+        with col3:
+            st.caption(f"{chunk_count} chunks")
+        with col4:
+            st.caption(f"{entity_count} entities")
+
+        # View detail button
+        if st.button("View Chunks", key=f"view_doc_{doc_id}", use_container_width=True):
+            st.session_state[f"viewing_doc_{doc_id}"] = not st.session_state.get(f"viewing_doc_{doc_id}", False)
+
+        # Show document detail if toggled
+        if st.session_state.get(f"viewing_doc_{doc_id}", False):
+            with st.spinner(f"Loading chunks for {doc['title']}..."):
+                detail = fetch_document_detail(token, doc_id)
+
+            if detail:
+                chunks = detail.get("chunks", [])
+                entities = detail.get("entities", [])
+
+                # Filter chunks if search query exists
+                if search_query:
+                    search_lower = search_query.lower()
+                    chunks = [c for c in chunks if search_lower in (c.get("text", "") or "").lower()
+                              or search_lower in (c.get("clause_ref", "") or "").lower()]
+
+                # Display chunks
+                if chunks:
+                    st.markdown(f"**Chunks ({len(chunks)})**")
+                    for i, chunk in enumerate(chunks):
+                        clause_ref = chunk.get("clause_ref", "N/A")
+                        section_path = chunk.get("section_path", "")
+                        token_count = chunk.get("token_count", 0)
+                        text = chunk.get("text", "")
+
+                        # Create a collapsible expander for each chunk
+                        with st.expander(f"Chunk {i+1}: {clause_ref} ({token_count} tokens) - {section_path[:50]}{'...' if len(section_path) > 50 else ''}"):
+                            st.markdown(f"**Clause Ref:** `{clause_ref}`")
+                            st.markdown(f"**Section Path:** {section_path}")
+                            st.markdown(f"**Token Count:** {token_count}")
+                            st.divider()
+                            st.markdown(text)
+                else:
+                    st.info("No chunks found for this document.")
+
+                # Display entities
+                if entities:
+                    st.markdown(f"**Entities ({len(entities)})**")
+                    for entity in entities:
+                        st.markdown(f"- **{entity.get('type', 'N/A')}**: {entity.get('name', 'N/A')}")
+                        if entity.get("attrs"):
+                            st.json(entity["attrs"])
+
+        st.divider()
 
 
 def render_citations(citations):
@@ -505,6 +820,11 @@ st.markdown(
     .st-key-chat_transcript .metric-text {
         color: #9aa3b0;
     }
+    .users-section h4 {
+        color: #d7dce3;
+        font-size: 1em;
+        margin-bottom: 8px;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -783,7 +1103,7 @@ if is_admin:
                 unsafe_allow_html=True,
             )
         with col_btns:
-            col_a, col_i = st.columns(2)
+            col_a, col_i, col_d, col_u = st.columns(4)
             with col_a:
                 if st.button(
                     "Assistant",
@@ -800,9 +1120,29 @@ if is_admin:
                 ):
                     st.session_state.active_view = "ingestion"
                     st.rerun()
+            with col_d:
+                if st.button(
+                    "Documents",
+                    use_container_width=True,
+                    type="primary" if st.session_state.active_view == "documents" else "secondary",
+                ):
+                    st.session_state.active_view = "documents"
+                    st.rerun()
+            with col_u:
+                if st.button(
+                    "Users",
+                    use_container_width=True,
+                    type="primary" if st.session_state.active_view == "users" else "secondary",
+                ):
+                    st.session_state.active_view = "users"
+                    st.rerun()
 
     if st.session_state.active_view == "ingestion":
         render_ingestion_tab(st.session_state.token)
+    elif st.session_state.active_view == "documents":
+        render_documents_tab(st.session_state.token)
+    elif st.session_state.active_view == "users":
+        render_users_tab(st.session_state.token)
     else:
         render_assistant_tab()
 else:

@@ -155,3 +155,18 @@ class AuditLog(Base):
     action = Column(String(50))
     payload = Column(JSON, default={})
     ts = Column(DateTime, default=datetime.utcnow)
+
+
+class User(Base):
+    """User authentication and RBAC."""
+    __tablename__ = 'users'
+    __table_args__ = {'extend_existing': True}
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    username = Column(String(100), unique=True, nullable=False)
+    password_hash = Column(Text, nullable=False)
+    department = Column(String(100), nullable=False)
+    access_level = Column(Integer, default=1)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -21,6 +21,25 @@ if [ -f "$CODEX_DIR/.env" ]; then
     set -a; source "$CODEX_DIR/.env"; set +a
 fi
 
+# Stop Docker containers that conflict with local services
+echo "Checking for Docker containers..."
+if docker info >/dev/null 2>&1; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "codex-"; then
+        echo "  Stopping Docker containers..."
+        cd "$CODEX_DIR"
+        docker compose down 2>/dev/null || {
+            for name in codex-db codex-graph codex-llm codex-api codex-ui codex-worker; do
+                docker stop "$name" 2>/dev/null && echo "    Stopped $name"
+            done
+        }
+        echo "  Docker containers stopped."
+    else
+        echo "  No running codex containers found."
+    fi
+else
+    echo "  Docker not available — skipping container cleanup."
+fi
+
 # Kill existing llama-servers on our ports to avoid conflicts
 for port in 8080 8081; do
     pid=$(lsof -t -i:"$port" 2>/dev/null || true)

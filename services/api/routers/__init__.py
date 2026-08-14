@@ -10,6 +10,7 @@ from .documents import router as documents_router
 from .admin import router as admin_router
 from .health import router as health_router
 from .integrations import router as integrations_router
+from .users import router as users_router
 
 
 def include_routers(app: FastAPI, bm25_index=None):
@@ -25,3 +26,4 @@ def include_routers(app: FastAPI, bm25_index=None):
     app.include_router(admin_router)
     app.include_router(health_router)
     app.include_router(integrations_router)
+    app.include_router(users_router)

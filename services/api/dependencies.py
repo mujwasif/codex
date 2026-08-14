@@ -1,26 +1,36 @@
 """
 Shared FastAPI dependencies for the Codex API.
 
-Centralizes authentication, audit logging, and the mock user store so the
+Centralizes authentication, audit logging, and the user store so the
 endpoint routers stay thin.
 """
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
-from codex.packages.shared.auth import verify_token, get_pwd_hash
+from codex.packages.shared.auth import verify_token
 from codex.packages.shared.db import get_db_session
-from codex.packages.shared.models import AuditLog
+from codex.packages.shared.models import AuditLog, User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-# MOCK USER DATABASE for MVP (Normally in Postgres)
-# Passwords are hashed with argon2 at startup (via hashward CryptContext)
-MOCK_USERS = {
-    "admin": {"username": "admin", "password": get_pwd_hash("password123"), "department": "IT", "access_level": 3, "is_active": True},
-    "manager": {"username": "manager", "password": get_pwd_hash("password123"), "department": "Finance", "access_level": 2, "is_active": True},
-    "employee": {"username": "employee", "password": get_pwd_hash("password123"), "department": "HR", "access_level": 1, "is_active": True},
-}
+
+def get_user_from_db(username: str) -> dict | None:
+    """Look up a user by username from PostgreSQL."""
+    try:
+        with get_db_session() as session:
+            user = session.query(User).filter(User.username == username).first()
+            if not user:
+                return None
+            return {
+                "username": user.username,
+                "department": user.department,
+                "access_level": user.access_level,
+                "is_active": user.is_active,
+            }
+    except Exception as e:
+        print(f"⚠️ DB user lookup failed: {e}")
+        return None
 
 
 def log_audit_action(actor: str, action: str, payload: dict = None):
@@ -51,7 +61,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 
 def get_current_active_user(current_user: dict = Depends(get_current_user)):
     username = current_user.get("username")
-    user = MOCK_USERS.get(username)
+    user = get_user_from_db(username)
     if not user or not user.get("is_active", False):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

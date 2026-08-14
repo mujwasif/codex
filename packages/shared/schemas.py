@@ -23,6 +23,18 @@ class UserResponse(BaseModel):
     access_level: int
     is_active: bool
 
+class UserUpdate(BaseModel):
+    department: Optional[str] = None
+    access_level: Optional[int] = Field(None, ge=1, le=3)
+
+class UserListResponse(BaseModel):
+    id: str
+    username: str
+    department: str
+    access_level: int
+    is_active: bool
+    created_at: str
+
 class Token(BaseModel):
     access_token: str
     token_type: str

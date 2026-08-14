@@ -12,9 +12,9 @@ from codex.packages.shared.schemas import (
     QueryCreate, QueryResponse, AnswerResponse, CitationResponse
 )
 from codex.packages.shared.db import get_db_session
-from codex.packages.shared.models import Query, Answer, Citation, Chunk, Document
+from codex.packages.shared.models import Query, Answer, Citation, Chunk, Document, User
 from codex.services.api.dependencies import (
-    get_current_active_user, log_audit_action, MOCK_USERS
+    get_current_active_user, log_audit_action
 )
 
 router = APIRouter(tags=["query"])
@@ -66,7 +66,16 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
     """
     username = current_user.get("username")
     level = current_user.get("access_level", 1)
-    department = MOCK_USERS.get(username, {}).get("department", "Unknown")
+
+    # Look up department from DB
+    department = "Unknown"
+    try:
+        with get_db_session() as session:
+            user = session.query(User).filter(User.username == username).first()
+            if user:
+                department = user.department
+    except Exception:
+        pass
 
     # 1. Load user's conversation history from DB
     with get_db_session() as session:
