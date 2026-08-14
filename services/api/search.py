@@ -2,6 +2,7 @@ from typing import List, Dict
 from sentence_transformers import CrossEncoder, SentenceTransformer
 from sqlalchemy import text
 from packages.shared.db import get_db_session
+from packages.shared.models import Document, Chunk
 from packages.shared.chunk_filter import is_low_info
 
 # Configuration
@@ -97,6 +98,187 @@ def vector_search(query: str, access_level: int, top_k: int = 20) -> List[Dict]:
 
     candidates = [c for c in candidates if not is_low_info(c.get("clause_ref"), c.get("text"))]
     return candidates[:top_k]
+
+
+def find_similar_clauses(
+    clause_text: str,
+    access_level: int,
+    exclude_doc_id: str = "",
+    top_k: int = 5,
+    threshold: float = 0.7,
+) -> List[Dict]:
+    """
+    Find semantically similar clauses across all accessible documents.
+
+    Args:
+        clause_text: The source clause text to find matches for.
+        access_level: RBAC level filter (1=Standard, 2=Manager, 3=Admin).
+        exclude_doc_id: If set, exclude chunks from this document.
+        top_k: Maximum similar clauses to return.
+        threshold: Minimum cosine similarity (0.0-1.0).
+
+    Returns:
+        List of chunk dicts with similarity score, sorted descending.
+    """
+    query_vector = retriever.encode(clause_text).tolist()
+    overfetch = max(top_k * 6, 60)
+
+    with get_db_session() as session:
+        sql = text("""
+            SELECT
+                c.id,
+                c.text,
+                c.document_id,
+                c.clause_ref,
+                c.section_path,
+                d.title,
+                1 - (c.embedding <=> CAST(:embedding AS vector)) AS similarity
+            FROM chunks c
+            JOIN documents d ON c.document_id = d.id
+            WHERE d.ingestion_status = 'ready'
+              AND d.access_level <= :user_level
+            ORDER BY c.embedding <=> CAST(:embedding AS vector)
+            LIMIT :limit
+        """)
+
+        result = session.execute(sql, {
+            "embedding": str(query_vector),
+            "user_level": access_level,
+            "limit": overfetch,
+        })
+
+        candidates = []
+        for row in result:
+            doc_id = str(row.document_id)
+            if exclude_doc_id and doc_id == exclude_doc_id:
+                continue
+            sim = float(row.similarity)
+            if sim < threshold:
+                continue
+            candidates.append({
+                "id": str(row.id),
+                "text": row.text,
+                "document_id": doc_id,
+                "clause_ref": row.clause_ref,
+                "section_path": row.section_path,
+                "title": row.title,
+                "similarity": sim,
+            })
+
+    candidates = [c for c in candidates if not is_low_info(c.get("clause_ref"), c.get("text"))]
+    return candidates[:top_k]
+
+
+def fetch_chunks_by_document(
+    doc_ids: List[str],
+    access_level: int,
+) -> Dict[str, List[Dict]]:
+    """
+    Fetch all accessible chunks grouped by document ID.
+
+    Args:
+        doc_ids: List of document UUIDs.
+        access_level: RBAC level filter.
+
+    Returns:
+        Dict mapping document_id -> list of chunk dicts.
+    """
+    if not doc_ids:
+        return {}
+
+    with get_db_session() as session:
+        chunks = (
+            session.query(Chunk)
+            .join(Document, Chunk.document_id == Document.id)
+            .filter(
+                Chunk.document_id.in_(doc_ids),
+                Document.ingestion_status == "ready",
+                Document.access_level <= access_level,
+            )
+            .order_by(Chunk.document_id, Chunk.section_path)
+            .all()
+        )
+
+    result: Dict[str, List[Dict]] = {}
+    for c in chunks:
+        doc_id = str(c.document_id)
+        result.setdefault(doc_id, []).append({
+            "id": str(c.id),
+            "text": c.text,
+            "document_id": doc_id,
+            "clause_ref": c.clause_ref,
+            "section_path": c.section_path,
+            "title": "",
+            "similarity": 0.0,
+        })
+
+    titles = {}
+    docs = session.query(Document).filter(Document.id.in_(doc_ids)).all()
+    for d in docs:
+        titles[str(d.id)] = d.title
+    for chunks_list in result.values():
+        for chunk in chunks_list:
+            chunk["title"] = titles.get(chunk["document_id"], "")
+
+    return result
+
+
+def build_cross_doc_candidates(
+    chunks_by_doc: Dict[str, List[Dict]],
+    source_chunks: List[Dict],
+    access_level: int,
+    threshold: float = 0.5,
+    max_pairs: int = 100,
+) -> List[Dict]:
+    """
+    Generate candidate pairs for cross-document conflict detection.
+
+    For each source chunk, find similar clauses from other documents
+    using embedding similarity as a pre-filter.
+
+    Args:
+        chunks_by_doc: All chunks grouped by document_id.
+        source_chunks: The primary chunks (e.g. from query retrieval or a
+            specific document). Used as the anchor set.
+        access_level: RBAC level.
+        threshold: Minimum similarity for a candidate pair.
+        max_pairs: Hard cap on returned pairs.
+
+    Returns:
+        List of dicts with keys: source_chunk, candidate_chunk, similarity.
+    """
+    all_candidates = []
+    seen_pairs = set()
+
+    for src in source_chunks:
+        src_id = src.get("id", "")
+        src_doc = src.get("document_id", "")
+        src_text = src.get("text", "")
+        if not src_text:
+            continue
+
+        similar = find_similar_clauses(
+            clause_text=src_text,
+            access_level=access_level,
+            exclude_doc_id=src_doc,
+            top_k=5,
+            threshold=threshold,
+        )
+
+        for sim_chunk in similar:
+            cand_id = sim_chunk.get("id", "")
+            pair_key = tuple(sorted([src_id, cand_id]))
+            if pair_key in seen_pairs:
+                continue
+            seen_pairs.add(pair_key)
+            all_candidates.append({
+                "source_chunk": src,
+                "candidate_chunk": sim_chunk,
+                "similarity": sim_chunk.get("similarity", 0.0),
+            })
+
+    all_candidates.sort(key=lambda x: x["similarity"], reverse=True)
+    return all_candidates[:max_pairs]
 
 
 def search_policy(

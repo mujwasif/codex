@@ -169,6 +169,68 @@ class ChunkDetailResponse(BaseModel):
     chunk: ChunkResponse
     document_title: Optional[str] = None
 
+class SimilarClauseResponse(BaseModel):
+    """A chunk with its similarity score to a source clause."""
+    chunk: ChunkResponse
+    similarity: float
+    document_title: Optional[str] = None
+
+
+# ============ Conflict Models ============
+
+class ConflictClauseInfo(BaseModel):
+    """Clause metadata inside a conflict record."""
+    id: str
+    document_id: str
+    document_title: str
+    clause_ref: Optional[str] = None
+    section_path: Optional[str] = None
+    text: str
+
+class ConflictPair(BaseModel):
+    """A confirmed or candidate conflict between two clauses."""
+    clause_a: ConflictClauseInfo
+    clause_b: ConflictClauseInfo
+    similarity: float
+    conflict: bool
+    reason: str
+    source: str          # "llm" | "version_check" | "neo4j"
+
+class ConflictCompareRequest(BaseModel):
+    """Request body for POST /v1/conflicts/compare."""
+    document_ids: Optional[List[str]] = Field(None, min_length=2, max_length=3)
+    document_names: Optional[List[str]] = Field(None, min_length=2, max_length=3)
+    similarity_threshold: float = Field(0.7, ge=0.0, le=1.0)
+    max_pairs: int = Field(100, ge=1, le=500)
+    max_llm_calls: int = Field(15, ge=1, le=50)
+
+class DocumentConflictGroup(BaseModel):
+    """Conflicts grouped by a document."""
+    document_id: str
+    document_title: str
+    conflicts: List[ConflictPair] = []
+    unchecked_candidate_count: int = 0
+    total_candidate_count: int = 0
+
+class ConflictCompareResponse(BaseModel):
+    """Response for POST /v1/conflicts/compare."""
+    doc_pairs: List[Dict[str, Any]] = []
+    total_conflicts: int = 0
+    total_candidates: int = 0
+    total_llm_calls: int = 0
+    similarity_threshold: float = 0.7
+    truncated: bool = False
+
+class DocumentConflictsResponse(BaseModel):
+    """Response for GET /documents/{doc_id}/conflicts."""
+    document_id: str
+    document_title: str
+    conflicting_documents: List[DocumentConflictGroup] = []
+    total_conflicts: int = 0
+    total_llm_calls: int = 0
+    similarity_threshold: float = 0.7
+    truncated: bool = False
+
 
 # ============ Entity Models ============
 

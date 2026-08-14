@@ -153,27 +153,115 @@ class QueryContext:
         return " ".join(lines)
 
     def build_conflict_answer(self) -> str:
-        """Prose answer for a conflict intent, built from detected conflicts."""
+        """Human-readable conflict answer with full detail and recommendations."""
         if not self.conflicts:
             return ""
-        lines = ["I detected conflicting requirements between policy clauses:"]
-        for c in self.conflicts:
-            ref_a = c.get("clause_a", "")
-            ref_b = c.get("clause_b", "")
+
+        count = len(self.conflicts)
+        lines = [f"I found {count} {'conflict' if count == 1 else 'conflicts'} between your policies:\n"]
+
+        for i, c in enumerate(self.conflicts, 1):
+            ca = c.get("clause_a", {})
+            cb = c.get("clause_b", {})
             reason = c.get("reason", "")
-            source = c.get("source", "")
-            labels = []
-            if c.get("ref"):
-                labels.append(f"Clause {c['ref']}")
-            else:
-                if ref_a:
-                    labels.append(ref_a)
-                if ref_b:
-                    labels.append(ref_b)
-            where = " and ".join(labels) if labels else "Unknown clauses"
-            detail = f"{reason} (source: {source})" if reason else f"contradiction found (source: {source})"
-            lines.append(f"- {where}: {detail}.")
-        return " ".join(lines)
+
+            title_a = ca.get("document_title", "") if isinstance(ca, dict) else ""
+            title_b = cb.get("document_title", "") if isinstance(cb, dict) else ""
+            ref_a = ca.get("clause_ref", "") if isinstance(ca, dict) else ""
+            ref_b = cb.get("clause_ref", "") if isinstance(cb, dict) else ""
+            text_a = ca.get("text", "") if isinstance(ca, dict) else ""
+            text_b = cb.get("text", "") if isinstance(cb, dict) else ""
+            section_a = ca.get("section_path", "") if isinstance(ca, dict) else ""
+            section_b = cb.get("section_path", "") if isinstance(cb, dict) else ""
+
+            topic = self._extract_topic(text_a, text_b, reason)
+            lines.append(f"{i}. **{topic}**")
+
+            if text_a and len(text_a) > 10:
+                snippet_a = text_a[:120].rstrip(".")
+                lines.append(f'   {title_a or "Document A"} says: "{snippet_a}."')
+            if text_b and len(text_b) > 10:
+                snippet_b = text_b[:120].rstrip(".")
+                lines.append(f'   {title_b or "Document B"} says: "{snippet_b}."')
+
+            if reason:
+                lines.append(f"   Conflict: {reason}.")
+
+            src_parts = []
+            if title_a:
+                src_parts.append(f"{title_a} §{ref_a}" if ref_a else title_a)
+            if title_b:
+                src_parts.append(f"{title_b} §{ref_b}" if ref_b else title_b)
+            if src_parts:
+                lines.append(f"   Source: {' vs '.join(src_parts)}")
+
+            lines.append("")
+
+        lines.append(self._build_conflict_recommendation())
+        return "\n".join(lines)
+
+    def _extract_topic(self, text_a: str, text_b: str, reason: str) -> str:
+        """Extract a short topic label from clause texts or reason."""
+        combined = (text_a + " " + text_b + " " + reason).lower()
+        for keyword, label in [
+            ("password", "Password Policy"),
+            ("retention", "Data Retention"),
+            ("multi-factor", "Multi-Factor Authentication"),
+            ("mfa", "Multi-Factor Authentication"),
+            ("access log", "Access Logging"),
+            ("access must", "Access Control"),
+            ("vendor data", "Vendor Data Retention"),
+            ("vendor access", "Vendor Access"),
+            ("compliance", "Compliance"),
+            ("audit", "Audit Requirements"),
+            ("badge", "Badge / Physical Access"),
+            ("onboarding", "Onboarding"),
+            ("termination", "Termination"),
+            ("incident", "Incident Response"),
+            ("encryption", "Encryption"),
+            ("backup", "Backup Policy"),
+            ("data must", "Data Handling"),
+            ("employee data", "Employee Data"),
+            ("record", "Record Keeping"),
+            ("review", "Review Cycle"),
+            ("security", "Security Standard"),
+        ]:
+            if keyword in combined:
+                return label
+        return "Policy Conflict"
+
+    def _build_conflict_recommendation(self) -> str:
+        """Generate a recommendation based on detected conflicts."""
+        if not self.conflicts:
+            return ""
+
+        count = len(self.conflicts)
+        lines = ["**Recommendation:**"]
+
+        if count == 1:
+            lines.append(
+                "Review the conflicting clauses above and align them to the stricter "
+                "standard, or document an approved exception with the policy owner."
+            )
+        else:
+            lines.append(
+                f"With {count} conflicts detected across your policies, I recommend "
+                "a policy alignment review. Prioritize aligning to the stricter standard "
+                "for each conflict to reduce compliance risk."
+            )
+
+        doc_titles = set()
+        for c in self.conflicts:
+            ca = c.get("clause_a", {})
+            cb = c.get("clause_b", {})
+            if isinstance(ca, dict) and ca.get("document_title"):
+                doc_titles.add(ca["document_title"])
+            if isinstance(cb, dict) and cb.get("document_title"):
+                doc_titles.add(cb["document_title"])
+        if doc_titles:
+            lines.append(f"Policies involved: {', '.join(sorted(doc_titles))}.")
+
+        return "\n".join(lines)
 
     def build_risk_answer(self) -> str:
         """Prose answer for a compliance intent, built from the risk assessment."""
@@ -451,10 +539,19 @@ def agent_reason(ctx: QueryContext):
 
         # For conflict/compliance intents the specialized agent verdict is
         # the primary answer once its structured result is available.
-        if ctx.intent == QueryIntent.CONFLICT and ctx.conflicts:
-            conflict_answer = ctx.build_conflict_answer()
-            if conflict_answer:
-                ctx.answer = conflict_answer
+        if ctx.intent == QueryIntent.CONFLICT:
+            if ctx.conflicts:
+                conflict_answer = ctx.build_conflict_answer()
+                if conflict_answer:
+                    ctx.answer = conflict_answer
+                    ctx.state = QueryState.REASONED
+                    return
+            else:
+                ctx.answer = (
+                    "I searched for conflicts across the relevant policy clauses "
+                    "and did not find any contradictory requirements. The clauses "
+                    "appear to be consistent with each other."
+                )
                 ctx.state = QueryState.REASONED
                 return
         if ctx.intent == QueryIntent.COMPLIANCE and ctx.risk_result:
@@ -539,11 +636,19 @@ def agent_approval(ctx: QueryContext):
 
 
 def agent_conflict_check(ctx: QueryContext):
-    """Check for conflicts between clauses."""
-    from services.agents.conflict_agent import detect_conflicts_in_chunks
+    """Check for conflicts between clauses (Type 1: clause-vs-corpus expansion)."""
+    from services.agents.conflict_agent import (
+        detect_conflicts_in_chunks, expand_chunks_for_conflicts,
+    )
 
     try:
-        ctx.conflicts = detect_conflicts_in_chunks(ctx.chunks)
+        expanded = expand_chunks_for_conflicts(
+            ctx.chunks,
+            access_level=ctx.access_level,
+            max_similar_per_chunk=3,
+            threshold=0.7,
+        )
+        ctx.conflicts = detect_conflicts_in_chunks(expanded)
         ctx.state = QueryState.REASONED
     except Exception as e:
         ctx.conflicts = []

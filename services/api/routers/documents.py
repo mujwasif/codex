@@ -7,7 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from codex.packages.shared.schemas import (
     DocumentResponse, DocumentListResponse, DocumentDetailResponse,
     ChunkResponse, ChunkDetailResponse, PaginatedChunksResponse,
-    EntityResponse
+    EntityResponse, SimilarClauseResponse,
+    DocumentConflictsResponse, DocumentConflictGroup, ConflictPair,
+    ConflictClauseInfo,
 )
 from codex.packages.shared.db import get_db_session
 from codex.packages.shared.models import Document, Chunk, Entity
@@ -196,6 +198,148 @@ async def get_chunk_detail(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch chunk: {e}")
+
+
+@router.get("/chunks/{chunk_id}/similar", response_model=list[SimilarClauseResponse])
+async def find_similar_clauses(
+    chunk_id: str,
+    top_k: int = 5,
+    threshold: float = 0.7,
+    current_user: dict = Depends(get_current_active_user),
+):
+    """Find semantically similar clauses across all accessible documents."""
+    try:
+        access_level = current_user.get("access_level", 1)
+        with get_db_session() as session:
+            chunk = session.query(Chunk).filter(Chunk.id == chunk_id).first()
+            if not chunk:
+                raise HTTPException(status_code=404, detail="Chunk not found")
+
+            source_doc = session.query(Document).filter(Document.id == chunk.document_id).first()
+            if source_doc and source_doc.access_level > access_level:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+        from services.api.search import find_similar_clauses as _find_similar
+        similar = _find_similar(
+            clause_text=chunk.text,
+            access_level=access_level,
+            exclude_doc_id=str(chunk.document_id),
+            top_k=top_k,
+            threshold=threshold,
+        )
+
+        results = []
+        for sim in similar:
+            doc_title = ""
+            with get_db_session() as session:
+                doc = session.query(Document).filter(Document.id == sim["document_id"]).first()
+                doc_title = doc.title if doc else ""
+            results.append(SimilarClauseResponse(
+                chunk=ChunkResponse(
+                    id=sim["id"],
+                    document_id=sim["document_id"],
+                    section_path=sim.get("section_path"),
+                    clause_ref=sim.get("clause_ref"),
+                    page=None,
+                    text=sim["text"],
+                    token_count=None,
+                    created_at="",
+                ),
+                similarity=sim["similarity"],
+                document_title=doc_title,
+            ))
+        return results
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Similar clause search failed: {e}")
+
+
+@router.get("/documents/{document_id}/conflicts", response_model=DocumentConflictsResponse)
+async def get_document_conflicts(
+    document_id: str,
+    similarity_threshold: float = 0.5,
+    max_pairs: int = 100,
+    max_llm_calls: int = 15,
+    current_user: dict = Depends(get_current_active_user),
+):
+    """Find which documents conflict with the given document (Type 2b)."""
+    try:
+        access_level = current_user.get("access_level", 1)
+
+        with get_db_session() as session:
+            doc = session.query(Document).filter(Document.id == document_id).first()
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found")
+            if doc.access_level > access_level:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+            target_title = doc.title
+            chunks = (
+                session.query(Chunk)
+                .filter(Chunk.document_id == document_id)
+                .order_by(Chunk.section_path)
+                .all()
+            )
+            target_chunks = [
+                {
+                    "id": str(c.id),
+                    "text": c.text,
+                    "document_id": document_id,
+                    "clause_ref": c.clause_ref,
+                    "section_path": c.section_path,
+                    "title": target_title,
+                    "similarity": 0.0,
+                }
+                for c in chunks
+            ]
+
+        from services.agents.conflict_agent import detect_conflicting_documents
+        result = detect_conflicting_documents(
+            target_doc_chunks=target_chunks,
+            target_doc_id=document_id,
+            target_doc_title=target_title,
+            access_level=access_level,
+            similarity_threshold=similarity_threshold,
+            max_pairs=max_pairs,
+            max_llm_calls=max_llm_calls,
+        )
+
+        conflicting_docs = []
+        for doc_group in result["conflicting_documents"]:
+            conflicts = []
+            for c in doc_group.get("conflicts", []):
+                ca = c.get("clause_a", {})
+                cb = c.get("clause_b", {})
+                conflicts.append(ConflictPair(
+                    clause_a=ConflictClauseInfo(**ca),
+                    clause_b=ConflictClauseInfo(**cb),
+                    similarity=c.get("similarity", 0.0),
+                    conflict=c.get("conflict", False),
+                    reason=c.get("reason", ""),
+                    source=c.get("source", ""),
+                ))
+            conflicting_docs.append(DocumentConflictGroup(
+                document_id=doc_group["document_id"],
+                document_title=doc_group["document_title"],
+                conflicts=conflicts,
+                unchecked_candidate_count=doc_group.get("unchecked_candidate_count", 0),
+                total_candidate_count=doc_group.get("total_candidate_count", 0),
+            ))
+
+        return DocumentConflictsResponse(
+            document_id=document_id,
+            document_title=target_title,
+            conflicting_documents=conflicting_docs,
+            total_conflicts=result["total_conflicts"],
+            total_llm_calls=result["total_llm_calls"],
+            similarity_threshold=similarity_threshold,
+            truncated=result["truncated"],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Document conflict check failed: {e}")
 
 
 @router.get("/entities", response_model=list[EntityResponse])
