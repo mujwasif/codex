@@ -33,7 +33,7 @@ from integrations.base import ChatIntegration
 # Defaults so the module is importable in tests without env vars
 DEFAULT_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
 DEFAULT_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "")
-DEFAULT_API_URL = os.getenv("CODEX_API_URL", "http://localhost:8000")
+DEFAULT_API_URL = os.getenv("CODEX_API_URL", "http://127.0.0.1:8000")
 DEFAULT_USERS_MAP_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "slack_users.json"
 )

@@ -148,8 +148,6 @@ TEXT:
         temperature=0.0,
         max_tokens=4096,
         timeout=180.0,
-        retries=3,
-        backoff=5.0,
     )
 
     if not result.success:
@@ -182,7 +180,7 @@ TEXT:
 
 def detect_clauses(
     text: str, 
-    llama_url: Optional[str] = "http://localhost:8081/v1/chat/completions",
+    llama_url: Optional[str] = None,
     use_llm: bool = True
 ) -> List[str]:
     """
@@ -204,6 +202,9 @@ def detect_clauses(
         return []
     
     # Step 1: Try LLM
+    if use_llm and llama_url is None:
+        from packages.shared.config import LLAMA_4B_URL
+        llama_url = f"{LLAMA_4B_URL}/v1/chat/completions"
     if use_llm and llama_url:
         llm_clauses = detect_clauses_llm(text, llama_url)
         if llm_clauses:

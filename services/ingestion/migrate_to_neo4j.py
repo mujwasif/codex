@@ -5,9 +5,9 @@ Pure LLM-based graph generation using Qwen2.5-3B-Instruct with document-level ba
 Groups chunks by document and sends them in batches of 40 (~50 LLM calls for 1,976 chunks).
 
 Usage:
-    source /home/mujtaba/new_folder/fastmcp/venv/bin/activate
-    PYTHONPATH=/home/mujtaba/new_folder/codex python3 services/ingestion/migrate_to_neo4j.py
-    PYTHONPATH=/home/mujtaba/new_folder/codex python3 services/ingestion/migrate_to_neo4j.py --incremental
+    source .venv/bin/activate
+    python services/ingestion/migrate_to_neo4j.py
+    python services/ingestion/migrate_to_neo4j.py --incremental
 """
 
 import sys
@@ -18,10 +18,10 @@ from sqlalchemy import text
 from packages.shared.db import get_db_session
 from services.ingestion.llm_graph_generator import generate_graph_for_document, execute_graph_in_neo4j
 
-from packages.shared.config import NEO4J_URI
-neo = GraphDatabase.driver(NEO4J_URI)
+from packages.shared.config import MIGRATION_STATE_FILE, NEO4J_PASS, NEO4J_URI, NEO4J_USER
+neo = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS) if NEO4J_PASS else None)
 
-PROCESSED_FILE = "processed_docs.txt"
+PROCESSED_FILE = MIGRATION_STATE_FILE
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("neo4j_migration")
@@ -152,7 +152,7 @@ def main():
     summary()
 
     neo.close()
-    print("\nDone! http://localhost:7474")
+    print("\nDone! Neo4j graph migration complete.")
 
 
 if __name__ == "__main__":

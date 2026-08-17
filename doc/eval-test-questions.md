@@ -1,7 +1,7 @@
 # Intent Test Questions — Codex Policy Intelligence
 
-50 grounded evaluation questions, 10 per intent (APPROVAL, CONFLICT, COMPLIANCE, PROCEDURE, GENERAL).
-Grounded in the 24 archive policy/plan docs in `archive/` and the Neo4j graph. CONFLICT #1 is a real documented corpus ambiguity.
+74 grounded evaluation questions: 10 APPROVAL, 34 CONFLICT (10 core + 12 by type + 12 Clause-vs-Corpus validation/guardrail), 10 COMPLIANCE, 10 PROCEDURE, 10 GENERAL.
+Grounded in the 24 archive policy/plan docs in `archive/` and the Neo4j graph. CONFLICT #1 is a real documented corpus ambiguity. CONFLICT #11–34 cover the three conflict detection types and the structured Clause-vs-Corpus validation guardrails (Type 1: Clause-vs-Corpus, Type 2: Document-vs-Document, Type 2b: Document-vs-Corpus).
 
 ## 1. APPROVAL (who approves / authorizes) — graph-backed where possible
 
@@ -20,6 +20,13 @@ Grounded in the 24 archive policy/plan docs in `archive/` and the Neo4j graph. C
 
 ## 2. CONFLICT (contradictions / supersede) — includes one real ambiguity
 
+Three conflict detection types:
+- **Type 1 (Clause-vs-Corpus):** Finds conflicts between a topic and similar clauses across all documents. Triggered by `/query` with conflict intent.
+- **Type 2 (Document-vs-Document):** Compares 2-3 named documents. Triggered by `POST /v1/conflicts/compare`.
+- **Type 2b (Document-vs-Corpus):** Finds which documents conflict with a target document. Triggered by `GET /documents/{id}/conflicts`.
+
+### Core conflict questions (1–10)
+
 | # | Question | Expected basis |
 |---|----------|----------------|
 | 1 | Is there an inconsistency between the Vulnerability and Network Security policies on how often penetration testing happens? | Real ambiguity: Vulnerability Mgmt = "biannually" (2×/yr); Network Security = "at least once per year" |
@@ -32,6 +39,58 @@ Grounded in the 24 archive policy/plan docs in `archive/` and the Neo4j graph. C
 | 8 | Is there a conflict between BYOD and Remote Access policies on how to connect personal devices? | BYOD→Guest network only; Remote Access→VPN — complementary, no conflict |
 | 9 | Which policy would take precedence if the Change Management and Incident Response rules disagree? | No explicit precedence rule → expected "insufficient basis"/abstain |
 | 10 | Are the password-related requirements in Access Management consistent across the corpus? | Password Management Policy is referenced but not present in archive → expected limited/abstained answer |
+
+### Type 1: Clause-vs-Corpus (11–14)
+
+Questions that find similar clauses across all documents and check for contradictions. The expected result should distinguish confirmed conflicts, possible conflicts, complementary scope, supersession, and insufficient context. It should return all validated conflicts, not fabricate findings to reach three.
+
+| # | Question | Expected basis |
+|---|----------|----------------|
+| 11 | Are there conflicting rules about data retention across all policies? | Type 1: Data Retention (10yr payroll, 90-day logs) vs Log Mgmt (90-day logs) vs Backup (yearly integrity) — may surface retention tension between electronic logs and payroll |
+| 12 | Do any policies disagree on how often access rights should be reviewed? | Type 1: Access Mgmt says "quarterly review" — other docs may reference different cadences; likely no conflict (negative test) |
+| 13 | Are there conflicting requirements about how to handle stolen devices? | Type 1: Incident Response (notify + revoke credentials + shut down) vs Asset Management (report to COO + Asset Manager) — complementary procedures, check if system sees a clash |
+| 14 | Is there a conflict between policies about supplier data handling? | Type 1: Supplier Security (NDA + due diligence + monitoring) vs Data Retention (purging after contract) vs Clear Desk (physical security) — check for tension on data lifecycle |
+
+### Clause-vs-Corpus validation and guardrail questions (23–34)
+
+These questions exercise the structured semantic comparison and deterministic validation rules. Expected results include candidate counts, checked/unchecked analysis where exposed, both-clause citations, and an abstention or inconclusive result when evidence is insufficient.
+
+| # | Question | Expected basis |
+|---|----------|----------------|
+| 23 | Are there at least three distinct conflicts in the corpus involving mandatory retention periods? | Evaluate enough accessible candidates to find three when present; return every validated conflict ranked by confidence. |
+| 24 | If only one policy pair conflicts about password rotation, can you identify the single conflict without inventing two more? | Return one validated conflict; do not manufacture findings to reach the minimum target of three. |
+| 25 | Which rules look similar but are complementary because they apply to employees and administrators separately? | Different populations should produce `complementary_scope`, not a false threshold conflict. |
+| 26 | Do conditional remote-access requirements conflict when one applies only outside the office and the other applies only to internal networks? | Conditions must be compared; separated applicability should be `complementary_scope` or `no_conflict`. |
+| 27 | Do the password rules conflict when one policy says passwords must change every 90 days and another says every 60 days? | Same population, action, modality, and unit with incompatible thresholds; expected `confirmed_conflict` with both citations. |
+| 28 | Do a minimum seven-year retention rule and a maximum three-year retention rule conflict? | Comparator and threshold semantics should be recognized as incompatible obligations. |
+| 29 | Do a rule requiring encryption and a rule prohibiting encryption for the same data population conflict? | Negation and modality should produce a high-confidence conflict. |
+| 30 | Is an older 90-day password rule still in conflict with a newer active 60-day rule that explicitly supersedes it? | Expected `superseded` when version, effective date, and supersession metadata establish precedence. |
+| 31 | What happens when two related clauses do not identify their applicable population or precedence? | Expected `possible_conflict` or `insufficient_context`, not a definitive conflict. |
+| 32 | What happens when the conflict comparison budget prevents checking every retrieved candidate? | Expected inconclusive analysis with checked and unchecked candidate counts; never report definitive absence of conflicts. |
+| 33 | Can the same source/candidate conflict returned by semantic analysis and version analysis appear twice? | Duplicate findings should merge using the canonical source/candidate pair key. |
+| 34 | Can an employee retrieve or receive a conflict involving an admin-only policy? | Access-level filtering must exclude unauthorized clauses from candidates, evidence, answers, and citations. |
+
+### Type 2: Document-vs-Document (15–18)
+
+Questions that name 2 specific documents to compare head-to-head.
+
+| # | Question | Expected basis |
+|---|----------|----------------|
+| 15 | Are there conflicts between the Backup Policy and the Data Retention Policy? | Type 2: Backup defers retention to business/legal; Retention defines periods — should be no conflict (negative test) |
+| 16 | Compare the Access Management Policy and the BYOD Policy for contradictions. | Type 2: Access Mgmt requires MFA + least privilege; BYOD requires security package on guest network — complementary, no conflict |
+| 17 | Are there contradictions between the Encryption Policy and the Log Management Policy? | Type 2: Encryption requires TLS 1.2+ and at-rest encryption; Log Mgmt sends logs to SIEM — check if log encryption requirements conflict |
+| 18 | How do the Change Management and Incident Response policies differ on approval processes? | Type 2: Change Mgmt uses ISMS Manager + CAB; Incident Response uses CEO + PR for notification — different workflows, check if system flags as conflict |
+
+### Type 2b: Document-vs-Corpus (19–22)
+
+Questions that ask which documents in the corpus conflict with a single named document.
+
+| # | Question | Expected basis |
+|---|----------|----------------|
+| 19 | Which policies conflict with the Clear Desk and Screen Policy? | Type 2b: find all docs with conflicting lock-screen or physical-access rules — likely no conflict (Clear Desk is additive) |
+| 20 | Which documents contradict the Vulnerability Management Policy? | Type 2b: Network Security says "at least once per year" for pen tests; Vuln Mgmt says "biannually" — real conflict |
+| 21 | Are there any policies that conflict with the Removable Media policy? | Type 2b: Physical Media Transfer uses couriers + physical media; Removable Media bans most USB — possible clash on physical transfer methods |
+| 22 | Which other policies disagree with the Incident Response Plan on notification timelines? | Type 2b: find docs with different notification/approval chains — likely no conflict (IR Plan is the authoritative source) |
 
 ## 3. COMPLIANCE (regulation, ISO 27001, violation, mandatory)
 

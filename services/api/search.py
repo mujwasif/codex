@@ -1,17 +1,98 @@
 from typing import List, Dict
 from sentence_transformers import CrossEncoder, SentenceTransformer
-from sqlalchemy import text
+from sqlalchemy import text, func
 from packages.shared.db import get_db_session
-from packages.shared.models import Document, Chunk
+from packages.shared.models import Document, Chunk, Citation, Feedback, Answer, Query
 from packages.shared.chunk_filter import is_low_info
 
 # Configuration
-RETRIEVER_MODEL = 'BAAI/bge-large-en-v1.5'  # 1024 dimensions, high quality semantic embeddings
-RERANKER_MODEL = 'BAAI/bge-reranker-base'
+from packages.shared.config import RETRIEVER_DEVICE, RETRIEVER_MODEL, RERANKER_DEVICE, RERANKER_MODEL
+FEEDBACK_MIN_RATINGS = 3
+FEEDBACK_PRIOR_WEIGHT = 3.0
+FEEDBACK_MAX_BOOST = 0.10
 
 # Load models (CPU to keep the 8GB GPU free for the LLM servers)
-retriever = SentenceTransformer(RETRIEVER_MODEL, device="cpu")
-reranker = CrossEncoder(RERANKER_MODEL, device="cpu")
+retriever = SentenceTransformer(RETRIEVER_MODEL, device=RETRIEVER_DEVICE)
+reranker = CrossEncoder(RERANKER_MODEL, device=RERANKER_DEVICE)
+
+
+def _smoothed_feedback_rating(average: float, count: int) -> float:
+    """Return a globally smoothed 1-5 quality score."""
+    return ((count * average) + (FEEDBACK_PRIOR_WEIGHT * 3.0)) / (count + FEEDBACK_PRIOR_WEIGHT)
+
+
+def feedback_quality_boost(average: float, count: int) -> float:
+    """Map global ratings to a small bounded ranking adjustment."""
+    if count < FEEDBACK_MIN_RATINGS:
+        return 0.0
+    adjusted = _smoothed_feedback_rating(average, count)
+    return max(-FEEDBACK_MAX_BOOST, min(FEEDBACK_MAX_BOOST, (adjusted - 3.0) / 2.0 * FEEDBACK_MAX_BOOST))
+
+
+def get_global_chunk_feedback(chunk_ids: List[str]) -> Dict[str, Dict[str, float]]:
+    """Load global ratings for cited chunks without applying user-specific memory."""
+    if not chunk_ids:
+        return {}
+    try:
+        with get_db_session() as session:
+            rows = (
+                session.query(
+                    Citation.chunk_id,
+                    func.avg(Feedback.rating).label("average_rating"),
+                    func.count(Feedback.id).label("rating_count"),
+                )
+                .join(Feedback, Feedback.answer_id == Citation.answer_id)
+                .join(Answer, Answer.id == Citation.answer_id)
+                .filter(
+                    Citation.chunk_id.in_(chunk_ids),
+                    Answer.abstained.is_(False),
+                )
+                .group_by(Citation.chunk_id)
+                .all()
+            )
+        return {
+            str(chunk_id): {
+                "average_rating": float(avg),
+                "rating_count": int(count),
+            }
+            for chunk_id, avg, count in rows
+        }
+    except Exception as exc:
+        print(f"Feedback ranking unavailable: {exc}")
+        return {}
+
+
+def get_global_feedback_guidance(intent: str) -> str:
+    """Create non-factual guidance from global ratings for an intent."""
+    try:
+        with get_db_session() as session:
+            row = (
+                session.query(
+                    func.avg(Feedback.rating).label("average_rating"),
+                    func.count(Feedback.id).label("rating_count"),
+                )
+                .join(Answer, Answer.id == Feedback.answer_id)
+                .join(Query, Query.id == Answer.query_id)
+                .filter(Query.intent == intent, Answer.abstained.is_(False))
+                .one()
+            )
+        average, count = float(row.average_rating or 0), int(row.rating_count or 0)
+        if count < FEEDBACK_MIN_RATINGS:
+            return ""
+        if average < 3.0:
+            return (
+                f"Global ratings for {intent} answers are currently low ({average:.1f}/5 across {count} ratings). "
+                "Be especially careful to check scope, exceptions, dates, thresholds, and contradictions; "
+                "use only the retrieved policy clauses as factual evidence."
+            )
+        if average >= 4.0:
+            return (
+                f"Global ratings for {intent} answers are strong ({average:.1f}/5 across {count} ratings). "
+                "Preserve concise, direct answers while grounding every claim in the retrieved clauses."
+            )
+    except Exception as exc:
+        print(f"Feedback guidance unavailable: {exc}")
+    return ""
 
 
 def reciprocal_rank_fusion(result_lists: List[List[Dict]], k: int = 60) -> List[Dict]:
@@ -334,6 +415,18 @@ def search_policy(
 
         for i, score in enumerate(scores):
             candidates[i]["score"] = float(score)
+
+        feedback_scores = get_global_chunk_feedback([
+            str(c.get("id", "")) for c in candidates if c.get("id")
+        ])
+        for candidate in candidates:
+            stats = feedback_scores.get(str(candidate.get("id", "")))
+            if stats:
+                candidate["feedback_rating"] = stats["average_rating"]
+                candidate["feedback_count"] = stats["rating_count"]
+                candidate["score"] += feedback_quality_boost(
+                    stats["average_rating"], stats["rating_count"]
+                )
 
         ranked_results = sorted(candidates, key=lambda x: x["score"], reverse=True)
 

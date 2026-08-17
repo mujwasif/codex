@@ -5,7 +5,7 @@ from services.ingestion.clause_detector import detect_clauses, get_clause_stats
 
 def chunk_document_clauses(
     sections: List[Dict],
-    llama_url: Optional[str] = "http://localhost:8080/v1/chat/completions",
+    llama_url: Optional[str] = None,
     max_clause_tokens: int = 50,
     overlap_tokens: int = 3,
     use_llm: bool = True
@@ -28,6 +28,10 @@ def chunk_document_clauses(
     Returns:
         List of clause-level chunks with metadata
     """
+    if use_llm and llama_url is None:
+        from packages.shared.config import LLAMA_4B_URL
+        llama_url = f"{LLAMA_4B_URL}/v1/chat/completions"
+
     chunks = []
     clause_counter = {}
     prev_tail = ""

@@ -13,16 +13,22 @@ from services.ingestion.structure_chunker import chunk_document_clauses, get_chu
 
 # Configuration
 MODEL_NAME = 'BAAI/bge-large-en-v1.5'  # 1024 dimensions, high quality semantic embeddings
-from packages.shared.config import LLAMA_4B_URL
+from packages.shared.config import (
+    ARCHIVE_DIR,
+    EMBEDDING_DEVICE,
+    LLAMA_4B_URL,
+    MAX_CLAUSE_TOKENS,
+    OVERLAP_TOKENS,
+    USE_LLM_FOR_CHUNKING,
+)
 LLAMA_URL = f"{LLAMA_4B_URL}/v1/chat/completions"
 MAX_CLAUSE_TOKENS = 200
 OVERLAP_TOKENS = 20
-USE_LLM = True
+USE_LLM = USE_LLM_FOR_CHUNKING
 
 # Setup paths and model
-script_dir = os.path.dirname(os.path.abspath(__file__))
-archive_path = os.path.join(script_dir, '..', '..', 'archive')
-model = SentenceTransformer(MODEL_NAME, device="cpu")
+archive_path = ARCHIVE_DIR
+model = SentenceTransformer(MODEL_NAME, device=EMBEDDING_DEVICE)
 
 
 def _existing_doc(session, source_uri: str):
@@ -127,7 +133,7 @@ def ingest_file(file_path: str, session, force: bool = False):
                 clause_ref=chunk_data['clause_ref'],
                 page=chunk_data.get('page'),
                 text=chunk_data['text'],
-                embedding=str(embedding),
+                embedding=embedding.tolist() if hasattr(embedding, "tolist") else embedding,
                 token_count=chunk_data['token_count'],
                 version='v1',
                 access_level=access_level

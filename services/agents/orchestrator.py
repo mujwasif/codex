@@ -62,6 +62,7 @@ class QueryContext:
     # KG-enriched fields (filled by specialized agents)
     approval_result: Optional[Dict[str, Any]] = None
     conflicts: List[Dict[str, Any]] = field(default_factory=list)
+    conflict_analysis: Dict[str, Any] = field(default_factory=dict)
     risk_result: Optional[Dict[str, Any]] = None
 
     # Agent chain trace (recorded by run_pipeline)
@@ -105,6 +106,11 @@ class QueryContext:
             }
         if self.conflicts:
             reasoning["conflicts"] = self.conflicts
+        if self.conflict_analysis:
+            reasoning["conflict_analysis"] = {
+                key: value for key, value in self.conflict_analysis.items()
+                if key not in {"source_clauses", "corpus_candidates", "evidence", "conflicts"}
+            }
         if self.risk_result:
             reasoning["risk"] = {
                 "verdict": self.risk_result.get("verdict"),
@@ -187,6 +193,12 @@ class QueryContext:
             if reason:
                 lines.append(f"   Conflict: {reason}.")
 
+            status = c.get("status", "confirmed_conflict")
+            if status == "superseded":
+                lines.append("   Precedence: the available version metadata indicates that one requirement supersedes the other.")
+            elif status == "possible_conflict":
+                lines.append("   Uncertainty: the clauses may conflict, but the available metadata does not establish the outcome conclusively.")
+
             src_parts = []
             if title_a:
                 src_parts.append(f"{title_a} §{ref_a}" if ref_a else title_a)
@@ -194,9 +206,15 @@ class QueryContext:
                 src_parts.append(f"{title_b} §{ref_b}" if ref_b else title_b)
             if src_parts:
                 lines.append(f"   Source: {' vs '.join(src_parts)}")
+            if title_a and ref_a:
+                lines.append(f"   Citation A: [Doc: {title_a}, Clause: {ref_a}]")
+            if title_b and ref_b:
+                lines.append(f"   Citation B: [Doc: {title_b}, Clause: {ref_b}]")
 
             lines.append("")
 
+        if self.conflict_analysis.get("inconclusive"):
+            lines.append("Conflict analysis was inconclusive because some candidate clauses could not be evaluated.")
         lines.append(self._build_conflict_recommendation())
         return "\n".join(lines)
 
@@ -546,6 +564,13 @@ def agent_reason(ctx: QueryContext):
                     ctx.answer = conflict_answer
                     ctx.state = QueryState.REASONED
                     return
+            if ctx.conflict_analysis.get("inconclusive"):
+                ctx.answer = (
+                    "Conflict analysis was inconclusive because some candidate clauses "
+                    "could not be evaluated. No definitive absence of conflict can be reported."
+                )
+                ctx.state = QueryState.REASONED
+                return
             else:
                 ctx.answer = (
                     "I searched for conflicts across the relevant policy clauses "
@@ -565,7 +590,11 @@ def agent_reason(ctx: QueryContext):
             ctx.fail("No relevant policy clauses found")
             return
 
-        ctx.answer = generate_grounded_answer(ctx.question, ctx.chunks)
+        from services.api.search import get_global_feedback_guidance
+        feedback_guidance = get_global_feedback_guidance(ctx.intent.value)
+        ctx.answer = generate_grounded_answer(
+            ctx.question, ctx.chunks, feedback_guidance=feedback_guidance
+        )
         ctx.state = QueryState.REASONED
     except Exception as e:
         ctx.fail(f"Reasoning failed: {e}")
@@ -578,6 +607,9 @@ def agent_verify(ctx: QueryContext):
 
     try:
         is_valid, msg = verify_citations(ctx.answer, ctx.chunks)
+        if ctx.conflicts and not re.search(r"\[Doc: .*?, Clause: .*?\]", ctx.answer):
+            is_valid = False
+            msg = "Conflict answer does not cite both clause sources."
 
         # Build citations list
         ctx.citations = []
@@ -591,7 +623,7 @@ def agent_verify(ctx: QueryContext):
             })
 
         # Determine verdict
-        if not is_valid or "Insufficient" in ctx.answer:
+        if not is_valid or "Insufficient" in ctx.answer or ctx.conflict_analysis.get("inconclusive"):
             ctx.verdict = "abstained"
         elif ctx.risk_result and ctx.risk_result.get("verdict") in ("conditional", "violation"):
             # Surface compliance risk surfaced by the risk agent
@@ -637,21 +669,36 @@ def agent_approval(ctx: QueryContext):
 
 def agent_conflict_check(ctx: QueryContext):
     """Check for conflicts between clauses (Type 1: clause-vs-corpus expansion)."""
-    from services.agents.conflict_agent import (
-        detect_conflicts_in_chunks, expand_chunks_for_conflicts,
-    )
+    from services.agents.conflict_agent import analyze_clause_vs_corpus
 
     try:
-        expanded = expand_chunks_for_conflicts(
+        ctx.conflict_analysis = analyze_clause_vs_corpus(
             ctx.chunks,
             access_level=ctx.access_level,
-            max_similar_per_chunk=3,
-            threshold=0.7,
+            candidate_retrieval_limit=20,
+            minimum_conflict_targets=3,
+            maximum_llm_comparisons=15,
+            threshold=0.5,
         )
-        ctx.conflicts = detect_conflicts_in_chunks(expanded)
+        # Citation verification and API persistence must see every clause that
+        # contributed evidence, not only the initial query retrieval.
+        ctx.chunks = ctx.conflict_analysis.get("evidence", ctx.chunks)
+        ctx.conflicts = ctx.conflict_analysis.get("conflicts", [])
         ctx.state = QueryState.REASONED
     except Exception as e:
         ctx.conflicts = []
+        ctx.conflict_analysis = {
+            "status": "inconclusive",
+            "total_candidates": 0,
+            "checked_candidates": 0,
+            "unchecked_candidates": 0,
+            "llm_calls": 0,
+            "truncated": True,
+            "inconclusive": True,
+            "error": str(e),
+        }
+        ctx.error = f"Conflict analysis failed: {e}"
+        ctx.state = QueryState.REASONED
 
 
 def agent_risk_compliance(ctx: QueryContext):

@@ -33,7 +33,9 @@ class ConnectionPool:
             from packages.shared.config import NEO4J_URI
             neo4j_uri = NEO4J_URI
 
-        cls._neo4j_driver = GraphDatabase.driver(neo4j_uri)
+        from packages.shared.config import NEO4J_USER, NEO4J_PASS
+        auth = (NEO4J_USER, NEO4J_PASS) if NEO4J_PASS else None
+        cls._neo4j_driver = GraphDatabase.driver(neo4j_uri, auth=auth)
         cls._http_session = requests.Session()
         cls._initialized = True
         print("✅ ConnectionPool initialized")

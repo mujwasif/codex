@@ -20,7 +20,7 @@ STRICT RULES:
 """
 
 
-def generate_grounded_answer(query, context_chunks):
+def generate_grounded_answer(query, context_chunks, feedback_guidance=""):
     """
     Generate a grounded answer from retrieved clauses.
     
@@ -37,7 +37,11 @@ def generate_grounded_answer(query, context_chunks):
         for c in context_chunks
     ])
 
-    user_message = f"Context:\n{context_text}\n\nQuestion: {query}"
+    guidance_text = (
+        f"\n\nQuality guidance from aggregate user ratings (not policy evidence):\n{feedback_guidance}"
+        if feedback_guidance else ""
+    )
+    user_message = f"Context:\n{context_text}{guidance_text}\n\nQuestion: {query}"
 
     result = llm_generate(
         model=QWEN3_8B_MODEL,

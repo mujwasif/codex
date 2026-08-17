@@ -140,8 +140,8 @@ async def ingest_document(
                 {"filename": filename, "replaced_failed_document_id": failed_id},
             )
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    archive_dir = os.path.join(script_dir, "..", "..", "..", "archive")
+    from packages.shared.config import ARCHIVE_DIR
+    archive_dir = ARCHIVE_DIR
     os.makedirs(archive_dir, exist_ok=True)
 
     dest_path = os.path.join(archive_dir, filename)
@@ -279,7 +279,8 @@ def ingestion_status(
 
         log_tail = ""
         try:
-            log_path = "/tmp/ingestion_agent.log"
+            from packages.shared.config import LOG_DIR
+            log_path = os.path.join(LOG_DIR, "ingestion_agent.log")
             with open(log_path, "r", errors="ignore") as f:
                 lines = f.readlines()
                 log_tail = "".join(lines[-40:])

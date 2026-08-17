@@ -199,4 +199,3 @@ def infer_access_level(title: str, access_tags=None, full_text: str = "") -> int
         return 2
 
     return DEFAULT_ACCESS_LEVEL
-docker compose ps

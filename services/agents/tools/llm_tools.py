@@ -11,7 +11,16 @@ import json
 from typing import Optional
 from services.agents.tools.base import ToolResult, tool
 from services.agents.tools.connections import ConnectionPool
-from packages.shared.config import QWEN3_8B_MODEL, QWEN3_4B_MODEL
+from packages.shared.config import (
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_INGESTION_MODEL,
+    LLM_MODEL,
+    LLM_PROVIDER,
+    get_llm_provider,
+    QWEN3_8B_MODEL,
+    QWEN3_4B_MODEL,
+)
 
 AGENT_8081_MODELS = {QWEN3_4B_MODEL.lower()}
 
@@ -71,10 +80,25 @@ def llm_generate(
     try:
         session = ConnectionPool.get_http()
         from packages.shared.config import LLAMA_8B_URL, LLAMA_4B_URL
-        base_url = LLAMA_4B_URL if model.lower() in AGENT_8081_MODELS else LLAMA_8B_URL
+        provider = get_llm_provider()
+        if provider == "api":
+            if not LLM_API_KEY:
+                return ToolResult(success=False, error="LLM_API_KEY is not configured", tool_name="llm_generate")
+            base_url = LLM_BASE_URL
+            request_model = LLM_INGESTION_MODEL if model.lower() in AGENT_8081_MODELS else LLM_MODEL
+            payload["model"] = request_model
+            # These are llama.cpp/Qwen-specific and are rejected by most hosted APIs.
+            payload.pop("thinking_budget_tokens", None)
+            payload.pop("chat_template_kwargs", None)
+            headers = {"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json"}
+        else:
+            base_url = LLAMA_4B_URL if model.lower() in AGENT_8081_MODELS else LLAMA_8B_URL
+            headers = {}
+        endpoint = f"{base_url}/chat/completions" if provider == "api" else f"{base_url}/v1/chat/completions"
         resp = session.post(
-            f"{base_url}/v1/chat/completions",
+            endpoint,
             json=payload,
+            headers=headers,
             timeout=timeout
         )
         resp.raise_for_status()

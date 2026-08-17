@@ -11,7 +11,7 @@ archive/ are never auto-ingested. Only rows created by an explicit upload
 (ingestion_status='pending') are processed.
 
 Usage:
-    PYTHONPATH=/home/mujtaba/new_folder/codex python3 -m services.ingestion.ingestion_agent
+    python -m services.ingestion.ingestion_agent
 """
 
 import os
@@ -31,27 +31,40 @@ from packages.shared.models import Document, Chunk
 from packages.shared.access_control import infer_access_level
 from packages.shared.doc_parser import parse_document_structure
 from services.ingestion.structure_chunker import chunk_document_clauses, get_chunk_stats
+from packages.shared.config import (
+    CODEX_API_URL,
+    CLAIM_INTERVAL as CONFIG_CLAIM_INTERVAL,
+    GRAPH_BATCH_SIZE as CONFIG_GRAPH_BATCH_SIZE,
+    LLAMA_4B_URL,
+    LOG_DIR,
+    MAX_CLAUSE_TOKENS as CONFIG_MAX_CLAUSE_TOKENS,
+    OVERLAP_TOKENS as CONFIG_OVERLAP_TOKENS,
+    USE_LLM_FOR_CHUNKING,
+    WORKER_LOCK_PATH as CONFIG_WORKER_LOCK_PATH,
+    NEO4J_PASS,
+    NEO4J_URI,
+    NEO4J_USER,
+)
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("/tmp/ingestion_agent.log"),
+        logging.FileHandler(os.path.join(LOG_DIR, "ingestion_agent.log")),
     ],
 )
 logger = logging.getLogger("ingestion_agent")
 
-from packages.shared.config import NEO4J_URI, LLAMA_4B_URL
 LLAMA_URL = f"{LLAMA_4B_URL}/v1/chat/completions"
 MODEL_NAME = "BAAI/bge-large-en-v1.5"
-CLAIM_INTERVAL = 3
-MAX_CLAUSE_TOKENS = 200
-OVERLAP_TOKENS = 20
-USE_LLM = True
-GRAPH_BATCH_SIZE = 30
+CLAIM_INTERVAL = CONFIG_CLAIM_INTERVAL
+MAX_CLAUSE_TOKENS = CONFIG_MAX_CLAUSE_TOKENS
+OVERLAP_TOKENS = CONFIG_OVERLAP_TOKENS
+USE_LLM = USE_LLM_FOR_CHUNKING
+GRAPH_BATCH_SIZE = CONFIG_GRAPH_BATCH_SIZE
 
-WORKER_LOCK_PATH = "/tmp/ingestion_worker.pid"
+WORKER_LOCK_PATH = CONFIG_WORKER_LOCK_PATH
 
 _run_worker = True
 
@@ -119,7 +132,10 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 def _get_neo4j_driver():
     from neo4j import GraphDatabase
-    return GraphDatabase.driver(NEO4J_URI)
+    return GraphDatabase.driver(
+        NEO4J_URI,
+        auth=(NEO4J_USER, NEO4J_PASS) if NEO4J_PASS else None,
+    )
 
 
 def _doc_exists(doc_id: str) -> bool:
@@ -212,7 +228,7 @@ def process_document(doc_id: str, model: SentenceTransformer):
                     clause_ref=chunk_data["clause_ref"],
                     page=chunk_data.get("page"),
                     text=chunk_data["text"],
-                    embedding=str(embedding),
+                    embedding=embedding.tolist() if hasattr(embedding, "tolist") else embedding,
                     token_count=chunk_data["token_count"],
                     version="v1",
                     access_level=access_level,
@@ -237,7 +253,7 @@ def process_document(doc_id: str, model: SentenceTransformer):
         import requests as http_req
         admin_token = create_access_token({"username": "admin", "sub": "admin", "access_level": 3})
         resp = http_req.post(
-            "http://localhost:8000/admin/refresh-index",
+            f"{CODEX_API_URL.rstrip('/')}/admin/refresh-index",
             headers={"Authorization": f"Bearer {admin_token}"},
             timeout=10,
         )

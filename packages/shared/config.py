@@ -1,32 +1,61 @@
 """
 Centralized configuration — single source of truth.
 
-Reads from environment variables with sensible defaults for local dev.
-In Docker, docker-compose.yaml sets these to container names.
+Reads from environment variables with sensible defaults for local development.
 """
 import os
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _path_env(name: str, default: Path) -> str:
+    return str(Path(os.getenv(name, str(default))).expanduser())
 
 # ── Database ──────────────────────────────────────────────
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "127.0.0.1")
+POSTGRES_PORT = int(os.getenv("POSTGRES_PORT", "5432"))
+POSTGRES_USER = os.getenv("POSTGRES_USER", "codex_admin")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "password123")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "codex_db")
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://codex_admin:password123@localhost:5432/codex_db",
+    f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}",
 )
 DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "10"))
 DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "20"))
 
 # ── Neo4j ─────────────────────────────────────────────────
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASS = os.getenv("NEO4J_PASS", "")
+if not NEO4J_PASS and os.getenv("NEO4J_AUTH", "").startswith("neo4j/"):
+    NEO4J_PASS = os.getenv("NEO4J_AUTH", "").split("/", 1)[1]
 
-# ── LLM Servers ───────────────────────────────────────────
-LLAMA_8B_URL = os.getenv("LLAMA_8B_URL", "http://localhost:8080")
-LLAMA_4B_URL = os.getenv("LLAMA_4B_URL", "http://localhost:8081")
+# ── LLM Provider ──────────────────────────────────────────
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto").lower()
+LLM_API_KEY = os.getenv("LLM_API_KEY", os.getenv("OPENAI_API_KEY", ""))
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+LLM_INGESTION_MODEL = os.getenv("LLM_INGESTION_MODEL", LLM_MODEL)
+
+
+def get_llm_provider() -> str:
+    """Resolve auto mode to hosted API when a key exists, otherwise local."""
+    if LLM_PROVIDER == "auto":
+        return "api" if LLM_API_KEY else "local"
+    return LLM_PROVIDER
+
+# ── Local LLM Servers (used when LLM_PROVIDER=local) ──────
+LLAMA_8B_URL = os.getenv("LLAMA_8B_URL", "http://127.0.0.1:8080")
+LLAMA_4B_URL = os.getenv("LLAMA_4B_URL", "http://127.0.0.1:8081")
 QWEN3_8B_MODEL = os.getenv("QWEN3_8B_MODEL", "Qwen3-8B-Q4_K_M.gguf")
 QWEN3_4B_MODEL = os.getenv(
     "QWEN3_4B_MODEL", "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf"
 )
 
 # ── API ───────────────────────────────────────────────────
-CODEX_API_URL = os.getenv("CODEX_API_URL", "http://localhost:8000")
+CODEX_API_URL = os.getenv("CODEX_API_URL", "http://127.0.0.1:8000")
 API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-to-a-random-secure-string")
@@ -52,6 +81,7 @@ TOP_K_FINAL = int(os.getenv("TOP_K_FINAL", "5"))
 RRF_K = int(os.getenv("RRF_K", "60"))
 DEFAULT_SEARCH_MODE = os.getenv("DEFAULT_SEARCH_MODE", "hybrid")
 HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "5"))
+HISTORY_MAX_TOKENS = int(os.getenv("HISTORY_MAX_TOKENS", "2500"))
 
 # ── Ingestion ─────────────────────────────────────────────
 MAX_CLAUSE_TOKENS = int(os.getenv("MAX_CLAUSE_TOKENS", "200"))
@@ -67,6 +97,16 @@ SLACK_DEFAULT_USERNAME = os.getenv("SLACK_DEFAULT_USERNAME", "employee")
 SLACK_QUERY_TIMEOUT = int(os.getenv("SLACK_QUERY_TIMEOUT", "120"))
 
 # ── Infrastructure Paths ──────────────────────────────────
-CODEX_DIR = os.getenv("CODEX_DIR", "/home/mujtaba/new_folder/codex")
-VENV_DIR = os.getenv("VENV_DIR", "/home/mujtaba/new_folder/fastmcp/venv")
-MODELS_DIR = os.getenv("MODELS_DIR", "/home/mujtaba/models")
+CODEX_DIR = _path_env("CODEX_DIR", PROJECT_ROOT)
+VENV_DIR = _path_env("VENV_DIR", PROJECT_ROOT / ".venv")
+MODELS_DIR = _path_env("MODELS_DIR", PROJECT_ROOT / "models")
+ARCHIVE_DIR = _path_env("ARCHIVE_DIR", PROJECT_ROOT / "archive")
+DATA_DIR = _path_env("DATA_DIR", PROJECT_ROOT / ".data")
+LOG_DIR = _path_env("LOG_DIR", PROJECT_ROOT / "logs")
+STATE_DIR = _path_env("STATE_DIR", PROJECT_ROOT / ".state")
+WORKER_LOCK_PATH = _path_env("WORKER_LOCK_PATH", Path(STATE_DIR) / "ingestion_worker.pid")
+MIGRATION_STATE_FILE = _path_env("MIGRATION_STATE_FILE", Path(STATE_DIR) / "processed_docs.txt")
+LLAMA_CPP_BIN = os.getenv("LLAMA_CPP_BIN", "llama-server")
+PG_BIN = os.getenv("PG_BIN", "")
+PG_DATA = _path_env("PG_DATA", Path(DATA_DIR) / "postgres")
+NEO4J_HOME = os.getenv("NEO4J_HOME", "")

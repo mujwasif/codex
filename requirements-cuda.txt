@@ -1,0 +1,3 @@
+# Install the base requirements first, then this CUDA 12.1 wheel.
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.5.1+cu121

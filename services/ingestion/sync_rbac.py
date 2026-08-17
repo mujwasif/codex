@@ -7,10 +7,9 @@ ingestion), this script projects the authoritative access_level back onto
 the PostgreSQL documents + chunks tables.
 
 Usage:
-    source /home/mujtaba/new_folder/fastmcp/venv/bin/activate
-    cd /home/mujtaba/new_folder/codex
-    PYTHONPATH=/home/mujtaba/new_folder/codex python3 services/ingestion/sync_rbac.py
-    PYTHONPATH=/home/mujtaba/new_folder/codex python3 services/ingestion/sync_rbac.py --dry-run
+    source .venv/bin/activate
+    python services/ingestion/sync_rbac.py
+    python services/ingestion/sync_rbac.py --dry-run
 """
 
 import sys

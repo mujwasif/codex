@@ -13,7 +13,7 @@ and LLM-based pairwise conflict detection (structured JSON output).
 
 import json
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from services.agents.tools.neo4j_tools import neo4j_query
 from services.agents.tools.llm_tools import llm_generate, QWEN3_8B_MODEL
 
@@ -85,7 +85,27 @@ def _detect_version_conflicts(chunks: List[Dict[str, Any]]) -> List[Dict[str, An
 # LLM structured conflict check
 # ---------------------------------------------------------------------------
 
-def _llm_conflict_check(text_a: str, text_b: str) -> Dict[str, Any]:
+def _clause_prompt_context(clause: Any, label: str) -> str:
+    """Render clause text with its source context for semantic comparison."""
+    if isinstance(clause, dict):
+        text = str(clause.get("text", ""))[:1200]
+        title = clause.get("title", "") or clause.get("document_title", "")
+        ref = clause.get("clause_ref", "")
+        section = clause.get("section_path", "")
+        version = clause.get("version", "")
+        metadata = "; ".join(
+            part for part in (
+                f"document={title}" if title else "",
+                f"version={version}" if version else "",
+                f"clause={ref}" if ref else "",
+                f"section={section}" if section else "",
+            ) if part
+        )
+        return f"{label} ({metadata}):\n{text}" if metadata else f"{label}:\n{text}"
+    return f"{label}:\n{str(clause)[:1200]}"
+
+
+def _llm_conflict_check(text_a: Any, text_b: Any) -> Dict[str, Any]:
     """
     Use LLM to detect if two clauses contradict. Returns structured result:
 
@@ -93,15 +113,18 @@ def _llm_conflict_check(text_a: str, text_b: str) -> Dict[str, Any]:
 
     On failure or malformed output, returns unchecked=False (not a conflict).
     """
-    prompt = f"""Analyze these two policy clauses for a semantic conflict.
+    prompt = f"""Analyze these two policy clauses for a semantic conflict while preserving their source context.
 A conflict exists ONLY if the same role, process, or asset is subject to two different, incompatible requirements.
+Compare the subject, role, action, conditions, exceptions, thresholds, time periods, and obligation level.
 Rules for different roles (e.g. Admin vs Employee) are complementary, NOT conflicting.
+Similar wording alone is not a conflict. If the available text is insufficient, return conflict=false and explain what is missing.
 
-CLAUSE A: {text_a[:400]}
-CLAUSE B: {text_b[:400]}
+{_clause_prompt_context(text_a, "CLAUSE A")}
+
+{_clause_prompt_context(text_b, "CLAUSE B")}
 
 Respond with JSON only:
-{{"conflict": true/false, "confidence": 0.0-1.0, "reason": "brief explanation", "subject": "topic being compared"}}"""
+{{"status":"confirmed_conflict|possible_conflict|no_conflict|complementary_scope|insufficient_context|superseded", "subject":"topic", "scope_overlap":true, "difference_type":"threshold|modality|scope|time|negation|requirement", "source_requirement":"requirement from clause A", "candidate_requirement":"requirement from clause B", "confidence":0.0, "reason":"brief evidence-backed explanation", "missing_context":[]}}"""
 
     result = llm_generate(
         model=QWEN3_8B_MODEL,
@@ -134,11 +157,18 @@ Respond with JSON only:
 
     try:
         parsed = json.loads(json_match.group())
+        confidence = float(parsed.get("confidence", 0.5))
         return {
-            "conflict": bool(parsed.get("conflict", False)),
-            "confidence": min(max(float(parsed.get("confidence", 0.5)), 0.0), 1.0),
+            "conflict": bool(parsed.get("conflict", parsed.get("status") in {"confirmed_conflict", "possible_conflict", "superseded"})),
+            "status": parsed.get("status"),
+            "confidence": min(max(confidence, 0.0), 1.0),
             "reason": str(parsed.get("reason", "")),
             "subject": str(parsed.get("subject", "")),
+            "scope_overlap": parsed.get("scope_overlap", True),
+            "difference_type": parsed.get("difference_type", "requirement"),
+            "source_requirement": parsed.get("source_requirement", ""),
+            "candidate_requirement": parsed.get("candidate_requirement", ""),
+            "missing_context": parsed.get("missing_context", []),
         }
     except (json.JSONDecodeError, ValueError):
         return {"conflict": False, "confidence": 0.0, "reason": "Malformed JSON from LLM", "subject": ""}
@@ -245,8 +275,8 @@ def _evaluate_pairs(
             unchecked += 1
             continue
 
-        text_a = src.get("text", "")[:400]
-        text_b = cand.get("text", "")[:400]
+        text_a = src.get("text", "")[:1200]
+        text_b = cand.get("text", "")[:1200]
         if len(text_a) < 50 or len(text_b) < 50:
             unchecked += 1
             continue
@@ -279,6 +309,11 @@ def _build_conflict_record(
             "clause_ref": chunk_a.get("clause_ref", ""),
             "section_path": chunk_a.get("section_path", ""),
             "text": chunk_a.get("text", ""),
+            "origin": chunk_a.get("origin"),
+            "version": chunk_a.get("version"),
+            "effective_date": chunk_a.get("effective_date"),
+            "status": chunk_a.get("status"),
+            "page": chunk_a.get("page"),
         },
         "clause_b": {
             "id": chunk_b.get("id", ""),
@@ -287,6 +322,11 @@ def _build_conflict_record(
             "clause_ref": chunk_b.get("clause_ref", ""),
             "section_path": chunk_b.get("section_path", ""),
             "text": chunk_b.get("text", ""),
+            "origin": chunk_b.get("origin"),
+            "version": chunk_b.get("version"),
+            "effective_date": chunk_b.get("effective_date"),
+            "status": chunk_b.get("status"),
+            "page": chunk_b.get("page"),
         },
         "similarity": similarity,
         "conflict": info.get("conflict", False),
@@ -600,27 +640,262 @@ def detect_conflicts_in_chunks(chunks: List[Dict[str, Any]]) -> List[Dict[str, A
     version_conflicts = _detect_version_conflicts(chunks)
     all_conflicts.extend(version_conflicts)
 
-    llm_checked = 0
-    for i in range(min(len(chunks), 5)):
-        for j in range(i + 1, min(len(chunks), 6)):
-            a, b = chunks[i], chunks[j]
+    # Rank cross-document pairs by retrieval similarity instead of comparing
+    # only the first few list positions. This preserves the call budget while
+    # giving the semantic checker the most relevant candidate pairs.
+    candidate_pairs = []
+    for i, a in enumerate(chunks):
+        for b in chunks[i + 1:]:
             if a.get("document_id") == b.get("document_id"):
                 continue
-            text_a = a.get("text", "")[:400]
-            text_b = b.get("text", "")[:400]
-            if len(text_a) < 50 or len(text_b) < 50:
-                continue
-            llm_result = _llm_conflict_check(text_a, text_b)
-            llm_checked += 1
-            if llm_result.get("conflict"):
-                all_conflicts.append(_build_conflict_record(
-                    a, b,
-                    a.get("similarity", 0.0),
-                    {**llm_result, "source": "llm"},
-                ))
-            if llm_checked >= 5:
-                break
-        if llm_checked >= 5:
-            break
+            similarity = max(
+                float(a.get("similarity", 0.0) or 0.0),
+                float(b.get("similarity", 0.0) or 0.0),
+            )
+            candidate_pairs.append((similarity, a, b))
+
+    llm_checked = 0
+    for similarity, a, b in sorted(candidate_pairs, reverse=True, key=lambda item: item[0])[:5]:
+        text_a = a.get("text", "")[:1200]
+        text_b = b.get("text", "")[:1200]
+        if len(text_a) < 50 or len(text_b) < 50:
+            continue
+        # Keep the legacy entry point compatible with callers that provide a
+        # text-only checker; the dedicated Clause-vs-Corpus pipeline passes
+        # full dictionaries and metadata.
+        llm_result = _llm_conflict_check(a.get("text", ""), b.get("text", ""))
+        llm_checked += 1
+        if llm_result.get("conflict"):
+            all_conflicts.append(_build_conflict_record(
+                a, b, similarity, {**llm_result, "source": "llm"},
+            ))
 
     return all_conflicts
+
+
+# ---------------------------------------------------------------------------
+# Clause-vs-corpus semantic pipeline
+# ---------------------------------------------------------------------------
+
+CONFLICT_STATUSES = {
+    "confirmed_conflict",
+    "possible_conflict",
+    "no_conflict",
+    "complementary_scope",
+    "insufficient_context",
+    "superseded",
+}
+
+
+def _rule_attributes(text: str) -> Dict[str, Any]:
+    """Extract conservative, auditable rule attributes from clause text."""
+    value_matches = re.findall(r"\b(\d+(?:\.\d+)?)\s*(days?|weeks?|months?|years?|hours?|minutes?|%)\b", text.lower())
+    values = [{"value": float(v) if "." in v else int(v), "unit": u} for v, u in value_matches]
+    modal = "must not" if re.search(r"\b(must not|shall not|may not|prohibited|forbidden)\b", text, re.I) else None
+    if not modal:
+        modal_match = re.search(r"\b(must|shall|required|may|should|can)\b", text, re.I)
+        modal = modal_match.group(1).lower() if modal_match else None
+    roles = re.findall(
+        r"\b(employees?|administrators?|admins?|managers?|contractors?|vendors?|customers?|users?|staff|"
+        r"remote workers?|all personnel)\b", text, re.I,
+    )
+    normalized_roles = sorted({r.lower() for r in roles})
+    return {
+        "modal": modal,
+        "values": values,
+        "roles": normalized_roles,
+        "negated": bool(re.search(r"\b(not|never|禁止|prohibited|forbidden)\b", text, re.I)),
+        "dates": re.findall(r"\b(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}/\d{1,2}/20\d{2})\b", text),
+    }
+
+
+def _semantic_result(result: Dict[str, Any], clause_a: Dict[str, Any], clause_b: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize legacy and strict LLM responses into the new contract."""
+    if not isinstance(result, dict):
+        return {"status": "insufficient_context", "confidence": 0.0, "reason": "Invalid semantic result", "missing_context": ["result"]}
+    status = result.get("status")
+    if status is not None and status not in CONFLICT_STATUSES:
+        return {"status": "insufficient_context", "confidence": 0.0, "reason": "Unsupported semantic status", "missing_context": ["status"]}
+    if status is None:
+        status = "confirmed_conflict" if result.get("conflict") else "no_conflict"
+    try:
+        confidence = float(result.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if not 0.0 <= confidence <= 1.0:
+        confidence = 0.0
+        status = "insufficient_context"
+    attrs_a = _rule_attributes(clause_a.get("text", ""))
+    attrs_b = _rule_attributes(clause_b.get("text", ""))
+    if status in {"confirmed_conflict", "possible_conflict"} and confidence < 0.60:
+        status = "insufficient_context"
+    normalized = {
+        "status": status,
+        "subject": str(result.get("subject", "")),
+        "scope_overlap": bool(result.get("scope_overlap", True)),
+        "difference_type": str(result.get("difference_type", "requirement")),
+        "source_requirement": result.get("source_requirement", ""),
+        "candidate_requirement": result.get("candidate_requirement", ""),
+        "confidence": confidence,
+        "reason": str(result.get("reason", "")),
+        "missing_context": list(result.get("missing_context", []) or []),
+        "source_attributes": result.get("source_attributes", attrs_a),
+        "candidate_attributes": result.get("candidate_attributes", attrs_b),
+    }
+    if "status" in result and "scope_overlap" not in result:
+        normalized.update(status="insufficient_context", missing_context=["scope_overlap"])
+    return normalized
+
+
+def _validate_semantic_result(result: Dict[str, Any], clause_a: Dict[str, Any], clause_b: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply deterministic safety checks after semantic comparison."""
+    result = _semantic_result(result, clause_a, clause_b)
+    status = result["status"]
+    if status not in {"confirmed_conflict", "possible_conflict", "superseded"}:
+        return result
+    text_a, text_b = clause_a.get("text", "").lower(), clause_b.get("text", "").lower()
+    attrs_a, attrs_b = result["source_attributes"], result["candidate_attributes"]
+    roles_a, roles_b = set(attrs_a.get("roles", [])), set(attrs_b.get("roles", []))
+    if roles_a and roles_b and not (roles_a & roles_b or "all employees" in roles_a or "all employees" in roles_b):
+        result.update(status="complementary_scope", scope_overlap=False, reason="The clauses apply to different roles or populations.")
+        return result
+    if not result.get("reason") or not result.get("scope_overlap"):
+        result.update(status="insufficient_context", missing_context=["scope or explanation"])
+        return result
+    subject_words = {
+        word for word in re.findall(r"[a-z0-9]+", result.get("subject", "").lower())
+        if len(word) >= 4 and word not in {"same", "both", "rule", "policy", "requirement"}
+    }
+    words_a = set(re.findall(r"[a-z0-9]+", text_a))
+    words_b = set(re.findall(r"[a-z0-9]+", text_b))
+    def _subject_in(words: set) -> bool:
+        return not subject_words or any(
+            subject == word or subject.startswith(word[:5]) or word.startswith(subject[:5])
+            for subject in subject_words for word in words
+        )
+    if not _subject_in(words_a) or not _subject_in(words_b):
+        result.update(status="insufficient_context", missing_context=["subject not supported by both clauses"])
+        return result
+    for requirement, text in ((result.get("source_requirement"), text_a), (result.get("candidate_requirement"), text_b)):
+        if requirement and isinstance(requirement, str):
+            numbers = re.findall(r"\d+(?:\.\d+)?", requirement)
+            if numbers and not all(number in text for number in numbers):
+                result.update(status="insufficient_context", missing_context=["unsupported requirement value"])
+                return result
+    if status == "confirmed_conflict" and result["confidence"] < 0.85:
+        result["status"] = "possible_conflict"
+    return result
+
+
+def _canonical_pair_key(clause_a: Dict[str, Any], clause_b: Dict[str, Any]) -> Tuple[str, str, str, str]:
+    return (str(clause_a.get("document_id", "")), str(clause_a.get("id", "")),
+            str(clause_b.get("document_id", "")), str(clause_b.get("id", "")))
+
+
+def _build_semantic_conflict_record(clause_a: Dict[str, Any], clause_b: Dict[str, Any], similarity: float, result: Dict[str, Any]) -> Dict[str, Any]:
+    record = _build_conflict_record(clause_a, clause_b, similarity, {**result, "source": "semantic_llm"})
+    record.update({
+        "status": result.get("status", "insufficient_context"),
+        "confidence": result.get("confidence", 0.0),
+        "subject": result.get("subject", ""),
+        "difference_type": result.get("difference_type", "requirement"),
+        "scope_overlap": result.get("scope_overlap", False),
+        "missing_context": result.get("missing_context", []),
+        "source_requirement": result.get("source_requirement", ""),
+        "candidate_requirement": result.get("candidate_requirement", ""),
+        "conflict": result.get("status") in {"confirmed_conflict", "possible_conflict", "superseded"},
+    })
+    for side in ("clause_a", "clause_b"):
+        record[side]["origin"] = "query_source" if side == "clause_a" else "corpus_candidate"
+        record[side]["version"] = (clause_a if side == "clause_a" else clause_b).get("version")
+        record[side]["effective_date"] = (clause_a if side == "clause_a" else clause_b).get("effective_date")
+        record[side]["status"] = (clause_a if side == "clause_a" else clause_b).get("status")
+        record[side]["page"] = (clause_a if side == "clause_a" else clause_b).get("page")
+    return record
+
+
+def analyze_clause_vs_corpus(
+    source_chunks: List[Dict[str, Any]],
+    access_level: int,
+    candidate_retrieval_limit: int = 20,
+    minimum_conflict_targets: int = 3,
+    maximum_llm_comparisons: int = 15,
+    threshold: float = 0.5,
+) -> Dict[str, Any]:
+    """Compare query-source clauses with accessible corpus candidates."""
+    from services.api.search import find_similar_clauses
+
+    sources = []
+    seen_sources = set()
+    for chunk in source_chunks:
+        cid = chunk.get("id")
+        if cid and cid not in seen_sources:
+            item = dict(chunk)
+            item["origin"] = "query_source"
+            sources.append(item)
+            seen_sources.add(cid)
+
+    pairs, evidence = [], list(sources)
+    seen_candidates, seen_pairs = set(), set()
+    for source in sources:
+        text = source.get("text", "")
+        if len(text.strip()) < 30:
+            continue
+        candidates = find_similar_clauses(
+            clause_text=text,
+            access_level=access_level,
+            exclude_doc_id=source.get("document_id", ""),
+            top_k=candidate_retrieval_limit,
+            threshold=threshold,
+        ) or []
+        for candidate in candidates:
+            if candidate.get("document_id") == source.get("document_id") or candidate.get("id") == source.get("id"):
+                continue
+            candidate = dict(candidate)
+            candidate["origin"] = "corpus_candidate"
+            key = _canonical_pair_key(source, candidate)
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+            candidate_id = candidate.get("id")
+            if candidate_id not in seen_candidates:
+                seen_candidates.add(candidate_id)
+                evidence.append(candidate)
+            pairs.append({"source": source, "candidate": candidate, "similarity": float(candidate.get("similarity", 0.0) or 0.0)})
+
+    pairs.sort(key=lambda pair: pair["similarity"], reverse=True)
+    conflicts, checked, unchecked, llm_calls = [], 0, 0, 0
+    for pair in pairs:
+        if llm_calls >= maximum_llm_comparisons:
+            unchecked += 1
+            continue
+        source, candidate = pair["source"], pair["candidate"]
+        if len(source.get("text", "")) < 30 or len(candidate.get("text", "")) < 30:
+            unchecked += 1
+            continue
+        result = _validate_semantic_result(_llm_conflict_check(source, candidate), source, candidate)
+        llm_calls += 1
+        checked += 1
+        if result["status"] in {"confirmed_conflict", "possible_conflict", "superseded"}:
+            conflicts.append(_build_semantic_conflict_record(source, candidate, pair["similarity"], result))
+
+    unique = {}
+    for conflict in conflicts:
+        key = _canonical_pair_key(conflict["clause_a"], conflict["clause_b"])
+        previous = unique.get(key)
+        if previous is None or conflict.get("confidence", 0.0) > previous.get("confidence", 0.0):
+            unique[key] = conflict
+    conflicts = sorted(unique.values(), key=lambda item: (item.get("confidence", 0.0), item.get("scope_overlap", False), item.get("similarity", 0.0)), reverse=True)
+    return {
+        "source_clauses": sources,
+        "corpus_candidates": [c for c in evidence if c.get("origin") == "corpus_candidate"],
+        "evidence": evidence,
+        "conflicts": conflicts,
+        "total_candidates": len(pairs),
+        "checked_candidates": checked,
+        "unchecked_candidates": unchecked,
+        "llm_calls": llm_calls,
+        "truncated": unchecked > 0,
+        "inconclusive": unchecked > 0,
+        "minimum_conflict_targets": minimum_conflict_targets,
+    }

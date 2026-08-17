@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, Float, Boolean, DateTime, ForeignKey, Text, CheckConstraint, JSON
 from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
 from packages.shared.db import Base
 
 
@@ -43,7 +44,7 @@ class Chunk(Base):
     clause_ref = Column(Text)
     page = Column(Integer)
     text = Column(Text, nullable=False)
-    embedding = Column(Text)  # Store as JSON string for SQLite, vector for PostgreSQL
+    embedding = Column(Vector(1024))
     token_count = Column(Integer)
     version = Column(String(20))  # "v1", "v2", etc.
     access_level = Column(Integer, default=1)

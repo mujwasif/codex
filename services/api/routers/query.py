@@ -9,18 +9,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import joinedload
 
 from codex.packages.shared.schemas import (
-    QueryCreate, QueryResponse, AnswerResponse, CitationResponse
+    QueryCreate, QueryResponse, AnswerResponse, CitationResponse, ConflictAnalysisResponse
 )
 from codex.packages.shared.db import get_db_session
 from codex.packages.shared.models import Query, Answer, Citation, Chunk, Document, User
 from codex.services.api.dependencies import (
     get_current_active_user, log_audit_action
 )
+from codex.packages.shared.config import HISTORY_MAX_TOKENS, HISTORY_TURNS
 
 router = APIRouter(tags=["query"])
-
-HISTORY_TURNS = 5
-
 
 def _load_user_history(session, user_id: str, limit: int = HISTORY_TURNS):
     """
@@ -48,13 +46,45 @@ def _load_user_history(session, user_id: str, limit: int = HISTORY_TURNS):
     return turns
 
 
-def _build_pipeline_question(question: str, history: list[dict]) -> str:
-    """Prepend conversation history to the question for the pipeline."""
+def _estimate_tokens(text: str) -> int:
+    """Conservatively estimate tokens without loading a tokenizer."""
+    return max(1, (len(text) + 3) // 4)
+
+
+def _build_pipeline_question(
+    question: str,
+    history: list[dict],
+    max_history_tokens: int = HISTORY_MAX_TOKENS,
+) -> str:
+    """Prepend the newest history that fits the working-memory budget.
+
+    History is selected newest-first, then rendered in chronological order.
+    The current question is never truncated or displaced by old answers.
+    """
     if not history:
         return question
-    history_text = "\n".join(
-        f"User: {h['question']}\nCodex: {h['answer']}" for h in history
-    )
+
+    selected = []
+    used_tokens = 0
+    for turn in reversed(history):
+        rendered = f"User: {turn['question']}\nCodex: {turn['answer']}"
+        turn_tokens = _estimate_tokens(rendered)
+        if selected and used_tokens + turn_tokens > max_history_tokens:
+            break
+        if not selected and turn_tokens > max_history_tokens:
+            # Keep a bounded tail of an oversized answer rather than allowing
+            # one historical response to consume the entire context budget.
+            available_chars = max(4, max_history_tokens * 4)
+            question_text = str(turn.get("question", ""))
+            answer_text = str(turn.get("answer", ""))
+            prefix = f"User: {question_text}\nCodex: "
+            answer_budget = max(0, available_chars - len(prefix))
+            rendered = prefix + answer_text[:answer_budget]
+            turn_tokens = _estimate_tokens(rendered)
+        selected.append(rendered)
+        used_tokens += turn_tokens
+
+    history_text = "\n".join(reversed(selected))
     return f"Conversation History:\n{history_text}\n\nQuestion: {question}"
 
 
@@ -202,6 +232,20 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
         citations=citations_response,
         search_mode=search_mode,
         reasoning=ctx.build_reasoning(),
+        conflict_analysis=(
+            ConflictAnalysisResponse(
+                status="inconclusive" if ctx.conflict_analysis.get("inconclusive") else "complete",
+                conflicts=ctx.conflict_analysis.get("conflicts", []),
+                total_candidates=ctx.conflict_analysis.get("total_candidates", 0),
+                checked_candidates=ctx.conflict_analysis.get("checked_candidates", 0),
+                unchecked_candidates=ctx.conflict_analysis.get("unchecked_candidates", 0),
+                llm_calls=ctx.conflict_analysis.get("llm_calls", 0),
+                truncated=ctx.conflict_analysis.get("truncated", False),
+                inconclusive=ctx.conflict_analysis.get("inconclusive", False),
+            )
+            if ctx.intent.value == "conflict" and ctx.conflict_analysis
+            else None
+        ),
         next_steps=ctx.build_next_steps(),
         missing=ctx.build_missing(),
         created_at=time.strftime("%Y-%m-%dT%H:%M:%S")

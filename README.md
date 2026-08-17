@@ -43,69 +43,152 @@ User: "Who can approve a purchase over $10,000?"
 
 ---
 
-## Quick Start
+## Recommended Setup
 
-### 1. Clone and Configure
+Codex runs natively and supports three LLM modes:
+
+- `api`: hosted LLM using an API key
+- `local`: llama.cpp with local Qwen models
+- `auto`: uses API mode when a key exists, otherwise local mode
+
+### 1. Install System Requirements
+
+Required on the target machine:
+
+- Python 3.10+
+- PostgreSQL with the `pgvector` extension
+- Neo4j 5.26+
+- `curl`
+- `git`
+
+For local LLM mode, also install llama.cpp with `llama-server` and download:
+
+- Qwen3-8B GGUF model
+- Qwen3-4B GGUF model
+
+### 2. Clone and Configure
 
 ```bash
-git clone https://github.com/mujwasif/codex.git
+git clone <repository-url>
 cd codex
-
-# Create your .env from the template
 cp .env.example .env
-# Edit .env with your actual values (paths, passwords, API keys)
 ```
 
-### 2. Install Python Dependencies
+Edit `.env` with the values for the target machine.
+
+For hosted API mode:
+
+```env
+LLM_PROVIDER=api
+LLM_API_KEY=your_api_key
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+LLM_INGESTION_MODEL=gpt-4o-mini
+```
+
+For local llama.cpp mode:
+
+```env
+LLM_PROVIDER=local
+LLAMA_CPP_BIN=/path/to/llama-server
+MODELS_DIR=/path/to/models
+QWEN3_8B_MODEL_PATH=/path/to/models/Qwen3-8B-Q4_K_M.gguf
+QWEN3_4B_MODEL_PATH=/path/to/models/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf
+```
+
+For automatic selection:
+
+```env
+LLM_PROVIDER=auto
+```
+
+### 3. Configure PostgreSQL
+
+If PostgreSQL is already installed and running, configure it explicitly:
+
+```env
+PG_BIN=/path/to/postgresql/bin
+PG_DATA=/path/to/postgresql/data
+POSTGRES_HOST=127.0.0.1
+POSTGRES_PORT=5432
+POSTGRES_USER=codex_admin
+POSTGRES_PASSWORD=your_password
+POSTGRES_DB=codex_db
+DATABASE_URL=postgresql://codex_admin:your_password@127.0.0.1:5432/codex_db
+```
+
+When using a local PostgreSQL data directory, startup initializes the cluster,
+creates the database and user, enables `pgvector`, and loads the schema.
+
+### 4. Configure Neo4j
+
+```env
+NEO4J_HOME=/path/to/neo4j
+NEO4J_URI=bolt://127.0.0.1:7687
+NEO4J_USER=neo4j
+NEO4J_PASS=your_neo4j_password
+```
+
+If Neo4j is managed externally, start it before Codex. If it is installed
+locally, `start_codex.sh` attempts to start it.
+
+### 5. Create the Codex Environment
+
+Do not use an external virtualenv. Create the project-local environment:
 
 ```bash
-source /home/mujtaba/new_folder/fastmcp/venv/bin/activate
-pip install -r requirements.txt
+bash infra/setup_venv.sh
+source .venv/bin/activate
 ```
 
-### 3. Start Everything
+For CUDA-enabled PyTorch:
 
-Choose one mode:
+```bash
+CODEX_CUDA=true bash infra/setup_venv.sh
+```
 
-#### Option A: Local (recommended for development)
+The setup script creates `codex/.venv` and does not modify virtualenvs outside
+the repository.
+
+### 6. Validate Dependencies
+
+```bash
+bash infra/check_dependencies.py
+```
+
+The command must report:
+
+```text
+All Codex Python dependencies are installed and importable.
+```
+
+### 7. Start Codex
 
 ```bash
 bash infra/start_codex.sh
 ```
 
-Starts all 8 services directly on your machine: PostgreSQL, Neo4j, Qwen3-8B, Qwen3-4B, pgAdmin4, FastAPI, Streamlit UI, Ingestion Worker. Automatically stops any conflicting Docker containers first.
+This starts PostgreSQL, Neo4j, FastAPI, Streamlit, and the ingestion worker.
+Local llama.cpp servers start only when the resolved LLM mode is `local`.
 
-#### Option B: Docker
-
-```bash
-bash infra/start_docker.sh
-```
-
-Starts all 6 containers: PostgreSQL, Neo4j, LLM Server (8B+4B), FastAPI, Streamlit UI, Ingestion Worker.
-
-#### Stop Everything
+### 8. Verify
 
 ```bash
-# Docker
-docker compose down
-
-# Local — kill processes on known ports
-for port in 8000 8080 8081 8501 5050; do
-  pid=$(lsof -t -i:"$port" 2>/dev/null || true)
-  [ -n "$pid" ] && kill "$pid" 2>/dev/null
-done
-pkill -f "uvicorn|streamlit|ingestion_agent|pgadmin4" 2>/dev/null || true
+curl http://127.0.0.1:8000/health
 ```
 
-### 4. Verify
+Open the UI at `http://127.0.0.1:8501`.
+
+Logs are stored in `logs/`.
+
+### Stop Codex
 
 ```bash
-# Check API health
-curl http://localhost:8000/health
-
-# Open UI
-http://localhost:8501
+bash infra/unused/stop.sh
 ```
+
+Important: `.env` contains passwords and API keys. Never commit it. Rotate any
+credentials that have previously been exposed in a local `.env` file.
 
 ---
 
@@ -123,8 +206,8 @@ cp .env.example .env
 |----------|---------|-------------|
 | `DATABASE_URL` | `postgresql://postgres:password123@localhost:5432/codex_db` | PostgreSQL connection string |
 | `NEO4J_URI` | `bolt://localhost:7687` | Neo4j Bolt connection |
-| `QWEN3_8B_MODEL_PATH` | `/home/mujtaba/models/Qwen3-8B-Q4_K_M.gguf` | Path to Qwen3-8B model |
-| `QWEN3_4B_MODEL_PATH` | `/home/mujtaba/models/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` | Path to Qwen3-4B model |
+| `QWEN3_8B_MODEL_PATH` | `${MODELS_DIR}/Qwen3-8B-Q4_K_M.gguf` | Path to Qwen3-8B model |
+| `QWEN3_4B_MODEL_PATH` | `${MODELS_DIR}/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` | Path to Qwen3-4B model |
 | `LLM_8B_PORT` | `8080` | Qwen3-8B server port |
 | `LLM_4B_PORT` | `8081` | Qwen3-4B server port |
 | `GPU_LAYERS_8B` | `30` | GPU layers to offload for 8B |
@@ -220,16 +303,15 @@ archive/*.docx
 # 1. Drop new .docx/.pdf files into archive/
 
 # 2. Run ingestion (does NOT delete existing data — incremental)
-source /home/mujtaba/new_folder/fastmcp/venv/bin/activate
-cd /home/mujtaba/new_folder/codex
-PYTHONPATH=/home/mujtaba/new_folder/codex python3 services/ingestion/ingest.py
+source .venv/bin/activate
+python services/ingestion/ingest.py
 
 # 3. Refresh the BM25 search index
 curl -X POST http://localhost:8000/admin/refresh-index \
   -H "Authorization: Bearer <admin_token>"
 
 # 4. Update the knowledge graph (incremental)
-PYTHONPATH=/home/mujtaba/new_folder/codex python3 services/ingestion/migrate_to_neo4j.py --incremental
+python services/ingestion/migrate_to_neo4j.py --incremental
 ```
 
 ---
@@ -258,9 +340,8 @@ curl -X POST http://localhost:8000/query \
 ### Via CLI
 
 ```bash
-source /home/mujtaba/new_folder/fastmcp/venv/bin/activate
-cd /home/mujtaba/new_folder/codex
-PYTHONPATH=/home/mujtaba/new_folder/codex python3 -m services.chat.cli
+source .venv/bin/activate
+python -m services.chat.cli
 ```
 
 ### Search Modes
@@ -366,17 +447,16 @@ Map Slack user IDs to Codex usernames in `integrations/slack_users.json`:
 ## Testing
 
 ```bash
-source /home/mujtaba/new_folder/fastmcp/venv/bin/activate
-cd /home/mujtaba/new_folder/codex
+source .venv/bin/activate
 
-PYTHONPATH=/home/mujtaba/new_folder/codex python3 tests/test_answer_formatting.py
-PYTHONPATH=/home/mujtaba/new_folder/codex python3 tests/test_clause_detection_cot.py
-PYTHONPATH=/home/mujtaba/new_folder/codex python3 tests/test_graph_sanitizer.py
-PYTHONPATH=/home/mujtaba/new_folder/codex python3 tests/test_history.py
-PYTHONPATH=/home/mujtaba/new_folder/codex python3 tests/test_intent_routing.py
-PYTHONPATH=/home/mujtaba/new_folder/codex python3 tests/test_rbac.py
-PYTHONPATH=/home/mujtaba/new_folder/codex python3 tests/test_retrieval_quality.py
-PYTHONPATH=/home/mujtaba/new_folder/codex python3 tests/test_slack_integration.py
+python tests/test_answer_formatting.py
+python tests/test_clause_detection_cot.py
+python tests/test_graph_sanitizer.py
+python tests/test_history.py
+python tests/test_intent_routing.py
+python tests/test_rbac.py
+python tests/test_retrieval_quality.py
+python tests/test_slack_integration.py
 ```
 
 ---
@@ -398,42 +478,7 @@ codex/
 ├── tests/                 # Test suites
 ├── doc/                   # Architecture documentation
 ├── .env.example           # Environment variable template (50+ variables)
-├── Dockerfile             # Docker image (llama.cpp + system deps)
-├── docker-compose.yaml    # Docker orchestration (6 services)
 └── requirements.txt       # Python dependencies (17 packages)
-```
-
----
-
-## Docker Deployment
-
-### Build and Start
-
-```bash
-cd codex
-docker compose build
-docker compose up -d
-```
-
-### Verify
-
-```bash
-docker compose ps
-curl http://localhost:8000/health
-```
-
-### Stop
-
-```bash
-docker compose down
-```
-
-### Logs
-
-```bash
-docker compose logs -f api      # API logs
-docker compose logs -f llm-server  # LLM logs
-docker compose logs -f worker   # Ingestion worker logs
 ```
 
 ---
@@ -447,12 +492,6 @@ bash infra/run_graph_migration.sh
 
 # Start everything locally
 bash infra/start_codex.sh
-
-# Start everything via Docker
-bash infra/start_docker.sh
-
-# Stop everything (Docker)
-docker compose down
 
 # Refresh BM25 index after ingestion
 curl -X POST http://localhost:8000/admin/refresh-index \

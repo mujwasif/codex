@@ -86,6 +86,7 @@ class AnswerResponse(BaseModel):
     citations: List[CitationResponse] = []
     search_mode: str = "hybrid"
     reasoning: Optional[Dict[str, Any]] = None  # Agent chain trace
+    conflict_analysis: Optional["ConflictAnalysisResponse"] = None
     next_steps: List[str] = []  # Actionable recommendations
     missing: List[str] = []  # Required approvals/docs not satisfied
     created_at: str
@@ -105,13 +106,11 @@ class QueryResult(BaseModel):
 class FeedbackCreate(BaseModel):
     answer_id: str
     rating: int = Field(..., ge=1, le=5)
-    note: Optional[str] = None
 
 class FeedbackResponse(BaseModel):
     id: str
     answer_id: str
     rating: int
-    note: Optional[str]
     reviewer: str
     created_at: str
 
@@ -186,6 +185,11 @@ class ConflictClauseInfo(BaseModel):
     clause_ref: Optional[str] = None
     section_path: Optional[str] = None
     text: str
+    origin: Optional[str] = None
+    version: Optional[str] = None
+    effective_date: Optional[str] = None
+    status: Optional[str] = None
+    page: Optional[int] = None
 
 class ConflictPair(BaseModel):
     """A confirmed or candidate conflict between two clauses."""
@@ -195,6 +199,26 @@ class ConflictPair(BaseModel):
     conflict: bool
     reason: str
     source: str          # "llm" | "version_check" | "neo4j"
+    status: str = "confirmed_conflict"
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+    subject: Optional[str] = None
+    difference_type: Optional[str] = None
+    scope_overlap: bool = False
+    missing_context: List[str] = []
+    source_requirement: Optional[str] = None
+    candidate_requirement: Optional[str] = None
+
+
+class ConflictAnalysisResponse(BaseModel):
+    """Auditable Clause-vs-Corpus analysis metadata."""
+    status: str = "complete"
+    conflicts: List[ConflictPair] = []
+    total_candidates: int = 0
+    checked_candidates: int = 0
+    unchecked_candidates: int = 0
+    llm_calls: int = 0
+    truncated: bool = False
+    inconclusive: bool = False
 
 class ConflictCompareRequest(BaseModel):
     """Request body for POST /v1/conflicts/compare."""

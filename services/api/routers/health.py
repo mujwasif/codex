@@ -9,7 +9,7 @@ from codex.packages.shared.schemas import (
     HealthResponse, FeedbackCreate, FeedbackResponse
 )
 from codex.packages.shared.db import get_db_session
-from codex.packages.shared.models import Answer, Feedback
+from codex.packages.shared.models import Answer, Feedback, Query
 from codex.services.api.dependencies import get_current_active_user, log_audit_action
 
 router = APIRouter(tags=["health"])
@@ -31,15 +31,23 @@ async def health_check():
 
     try:
         import requests
-        from packages.shared.config import LLAMA_8B_URL, LLAMA_4B_URL
-        resp = requests.get(f"{LLAMA_8B_URL}/health", timeout=5)
-        reasoner_status = "healthy" if resp.status_code == 200 else "unhealthy"
+        from packages.shared.config import LLM_API_KEY, LLM_BASE_URL, LLAMA_8B_URL, get_llm_provider
+        if get_llm_provider() == "api":
+            resp = requests.get(f"{LLM_BASE_URL}/models", headers={"Authorization": f"Bearer {LLM_API_KEY}"}, timeout=5)
+            reasoner_status = "healthy" if resp.status_code == 200 else "unhealthy"
+        else:
+            resp = requests.get(f"{LLAMA_8B_URL}/health", timeout=5)
+            reasoner_status = "healthy" if resp.status_code == 200 else "unhealthy"
     except Exception:
         reasoner_status = "unavailable"
 
     try:
-        resp = requests.get(f"{LLAMA_4B_URL}/health", timeout=5)
-        qwen_status = "healthy" if resp.status_code == 200 else "unhealthy"
+        from packages.shared.config import LLM_API_KEY, LLAMA_4B_URL, get_llm_provider
+        if get_llm_provider() == "api":
+            qwen_status = "configured" if LLM_API_KEY else "unconfigured"
+        else:
+            resp = requests.get(f"{LLAMA_4B_URL}/health", timeout=5)
+            qwen_status = "healthy" if resp.status_code == 200 else "unhealthy"
     except Exception:
         qwen_status = "unavailable"
 
@@ -58,17 +66,32 @@ async def submit_feedback(feedback_data: FeedbackCreate, current_user: dict = De
 
     try:
         with get_db_session() as session:
-            answer = session.query(Answer).filter(Answer.id == feedback_data.answer_id).first()
+            answer = (
+                session.query(Answer)
+                .join(Query, Answer.query_id == Query.id)
+                .filter(Answer.id == feedback_data.answer_id, Query.user_id == username)
+                .first()
+            )
             if not answer:
                 raise HTTPException(status_code=404, detail="Answer not found")
 
-            feedback = Feedback(
-                answer_id=feedback_data.answer_id,
-                rating=feedback_data.rating,
-                note=feedback_data.note,
-                reviewer=username
+            feedback = (
+                session.query(Feedback)
+                .filter(
+                    Feedback.answer_id == feedback_data.answer_id,
+                    Feedback.reviewer == username,
+                )
+                .first()
             )
-            session.add(feedback)
+            if feedback is None:
+                feedback = Feedback(
+                    answer_id=feedback_data.answer_id,
+                    rating=feedback_data.rating,
+                    reviewer=username,
+                )
+                session.add(feedback)
+            else:
+                feedback.rating = feedback_data.rating
             session.commit()
 
             log_audit_action(username, "feedback", {
@@ -80,7 +103,6 @@ async def submit_feedback(feedback_data: FeedbackCreate, current_user: dict = De
                 id=str(feedback.id),
                 answer_id=str(feedback.answer_id),
                 rating=feedback.rating,
-                note=feedback.note,
                 reviewer=feedback.reviewer,
                 created_at=feedback.created_at.isoformat() if feedback.created_at else ""
             )
@@ -95,16 +117,19 @@ async def get_feedback_for_answer(answer_id: str, current_user: dict = Depends(g
     """Get feedback for a specific answer."""
     try:
         with get_db_session() as session:
-            feedbacks = session.query(Feedback).filter(
-                Feedback.answer_id == answer_id
-            ).all()
+            feedbacks = (
+                session.query(Feedback)
+                .join(Answer, Feedback.answer_id == Answer.id)
+                .join(Query, Answer.query_id == Query.id)
+                .filter(Feedback.answer_id == answer_id, Query.user_id == current_user.get("username"))
+                .all()
+            )
 
             return [
                 FeedbackResponse(
                     id=str(f.id),
                     answer_id=str(f.answer_id),
                     rating=f.rating,
-                    note=f.note,
                     reviewer=f.reviewer,
                     created_at=f.created_at.isoformat() if f.created_at else ""
                 )

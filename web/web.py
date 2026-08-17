@@ -1,7 +1,8 @@
 import requests
+import os
 import streamlit as st
 
-API_URL = "http://localhost:8000"  # Replace with your FastAPI server URL
+API_URL = os.getenv("CODEX_API_URL", "http://127.0.0.1:8000")
 st.set_page_config(page_title="Codex Policy Intelligence Engine", page_icon=":guardsman:", layout="wide")
 
 st.markdown(
@@ -36,5 +37,3 @@ if "messages" not in st.session_state:
 
 if "history" not in st.session_state:
     st.session_state.history = []
-
-    

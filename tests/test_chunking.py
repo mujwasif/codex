@@ -4,6 +4,7 @@ Test clause-level chunking and clause detection.
 """
 
 import os
+from pathlib import Path
 import sys
 
 # Add parent directory to path for imports
@@ -83,7 +84,7 @@ def test_clause_level_chunking():
     print("TEST 4: Clause-Level Chunking")
     print("=" * 60)
     
-    doc_path = '/home/mujtaba/new_folder/codex/archive/UnderDefense MAXI - Password management policy.docx'
+    doc_path = str(Path(__file__).resolve().parents[1] / 'archive' / 'UnderDefense MAXI - Password management policy.docx')
     
     if not os.path.exists(doc_path):
         print(f"❌ Test file not found: {doc_path}")
@@ -152,7 +153,7 @@ def test_overlapping():
     print("TEST 5: Overlapping Between Clauses")
     print("=" * 60)
     
-    doc_path = '/home/mujtaba/new_folder/codex/archive/UnderDefense MAXI - Password management policy.docx'
+    doc_path = str(Path(__file__).resolve().parents[1] / 'archive' / 'UnderDefense MAXI - Password management policy.docx')
     
     if not os.path.exists(doc_path):
         print(f"❌ Test file not found: {doc_path}")
@@ -202,7 +203,7 @@ def test_table_parsing():
     print("TEST 6: Table Parsing")
     print("=" * 60)
     
-    doc_path = '/home/mujtaba/new_folder/codex/archive/UnderDefense MAXI - Password management policy.docx'
+    doc_path = str(Path(__file__).resolve().parents[1] / 'archive' / 'UnderDefense MAXI - Password management policy.docx')
     
     if not os.path.exists(doc_path):
         print(f"❌ Test file not found: {doc_path}")

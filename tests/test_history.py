@@ -165,6 +165,34 @@ def test_build_pipeline_question_with_history():
     assert "Question: What about length?" in result
 
 
+def test_build_pipeline_question_respects_token_budget():
+    """Older turns are dropped when the working-memory budget is exceeded."""
+    from services.api.routers.query import _build_pipeline_question
+
+    history = [
+        {"question": "Old question", "answer": "old answer"},
+        {"question": "Recent question", "answer": "recent answer"},
+    ]
+    result = _build_pipeline_question("Current question", history, max_history_tokens=8)
+    assert "Recent question" in result
+    assert "Current question" in result
+    assert "Old question" not in result
+
+
+def test_build_pipeline_question_keeps_chronological_order_after_budgeting():
+    """Selected recent turns remain in conversation order."""
+    from services.api.routers.query import _build_pipeline_question
+
+    history = [
+        {"question": "Turn one", "answer": "Answer one"},
+        {"question": "Turn two", "answer": "Answer two"},
+        {"question": "Turn three", "answer": "Answer three"},
+    ]
+    result = _build_pipeline_question("Current", history, max_history_tokens=20)
+    assert "Turn one" not in result
+    assert result.index("Turn two") < result.index("Turn three")
+
+
 def main():
     print("\n" + "=" * 60)
     print("HISTORY TESTS")
@@ -177,6 +205,8 @@ def main():
         ("Skips queries without answers", test_load_user_history_skips_queries_without_answers),
         ("Build question no history", test_build_pipeline_question_no_history),
         ("Build question with history", test_build_pipeline_question_with_history),
+        ("History token budget", test_build_pipeline_question_respects_token_budget),
+        ("History chronological order", test_build_pipeline_question_keeps_chronological_order_after_budgeting),
     ]
     results = []
     for name, fn in tests:

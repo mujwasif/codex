@@ -6,10 +6,9 @@ Re-runs access-level inference over every document already in PostgreSQL
 Idempotent: only updates rows whose level changes.
 
 Usage:
-    source /home/mujtaba/new_folder/fastmcp/venv/bin/activate
-    cd /home/mujtaba/new_folder/codex
-    PYTHONPATH=/home/mujtaba/new_folder/codex python3 services/ingestion/backfill_access_levels.py
-    PYTHONPATH=/home/mujtaba/new_folder/codex python3 services/ingestion/backfill_access_levels.py --dry-run
+    source .venv/bin/activate
+    python services/ingestion/backfill_access_levels.py
+    python services/ingestion/backfill_access_levels.py --dry-run
 """
 
 import sys

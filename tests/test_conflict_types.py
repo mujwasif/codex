@@ -127,6 +127,25 @@ class TestVersionConflicts(unittest.TestCase):
 
 class TestLLMStructuredOutput(unittest.TestCase):
 
+    def test_prompt_preserves_clause_context(self):
+        captured = {}
+
+        def fake_generate(*args, **kwargs):
+            captured["prompt"] = kwargs["user_message"]
+            return _fake_llm_no_conflict()
+
+        a = _make_chunk("d1", "c1", "Password changes every 90 days.", "4.3.2", "Password Policy")
+        a["section_path"] = "Authentication > Rotation"
+        b = _make_chunk("d2", "c2", "Password changes every 60 days.", "6.1", "Access Policy")
+
+        with mock.patch("services.agents.conflict_agent.llm_generate", fake_generate):
+            _llm_conflict_check(a, b)
+
+        self.assertIn("Password Policy", captured["prompt"])
+        self.assertIn("4.3.2", captured["prompt"])
+        self.assertIn("Authentication > Rotation", captured["prompt"])
+        self.assertIn("Access Policy", captured["prompt"])
+
     @mock.patch("services.agents.conflict_agent.llm_generate", _fake_llm_success)
     def test_structured_json_conflict(self):
         result = _llm_conflict_check("text A", "text B")
