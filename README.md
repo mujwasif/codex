@@ -51,6 +51,18 @@ Codex runs natively and supports three LLM modes:
 - `local`: llama.cpp with local Qwen models
 - `auto`: uses API mode when a key exists, otherwise local mode
 
+For a new Ubuntu/Debian machine, the complete installer is:
+
+```bash
+git clone <repository-url>
+cd codex
+bash infra/install_codex.sh --llm api
+```
+
+Use `--llm local` for llama.cpp and local Qwen models, or `--llm auto` to
+choose automatically. The installer creates `.env`, installs system and
+Python dependencies, initializes the databases, and validates the deployment.
+
 ### 1. Install System Requirements
 
 Required on the target machine:
@@ -61,7 +73,8 @@ Required on the target machine:
 - `curl`
 - `git`
 
-For local LLM mode, also install llama.cpp with `llama-server` and download:
+For local LLM mode, the installer builds llama.cpp and downloads the required
+models when their download URLs are configured in `.env`:
 
 - Qwen3-8B GGUF model
 - Qwen3-4B GGUF model
@@ -153,7 +166,7 @@ the repository.
 ### 6. Validate Dependencies
 
 ```bash
-bash infra/check_dependencies.py
+python infra/check_dependencies.py
 ```
 
 The command must report:
@@ -204,8 +217,8 @@ cp .env.example .env
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | `postgresql://postgres:password123@localhost:5432/codex_db` | PostgreSQL connection string |
-| `NEO4J_URI` | `bolt://localhost:7687` | Neo4j Bolt connection |
+| `DATABASE_URL` | `postgresql://codex_admin:password@127.0.0.1:5432/codex_db` | PostgreSQL connection string |
+| `NEO4J_URI` | `bolt://127.0.0.1:7687` | Neo4j Bolt connection |
 | `QWEN3_8B_MODEL_PATH` | `${MODELS_DIR}/Qwen3-8B-Q4_K_M.gguf` | Path to Qwen3-8B model |
 | `QWEN3_4B_MODEL_PATH` | `${MODELS_DIR}/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` | Path to Qwen3-4B model |
 | `LLM_8B_PORT` | `8080` | Qwen3-8B server port |
@@ -222,59 +235,102 @@ See `.env.example` for the complete list of 50+ configurable variables.
 
 ---
 
-## Ingesting Documents
+## Start, Ingest, and Migrate
 
-### Batch Ingestion (from `archive/` folder)
-
-Place `.docx` or `.pdf` files in the `archive/` folder, then run the two-step process:
+Complete setup first, then start the native services:
 
 ```bash
-# Step 1: Reset database and ingest all documents from archive/
-bash infra/reset_and_reingest.sh
+source .venv/bin/activate
+python infra/check_dependencies.py
+bash infra/start_codex.sh
 ```
 
-This will:
-- Kill existing LLM servers to free VRAM
-- Start PostgreSQL and Neo4j if not running
-- Start Qwen3-4B in full-config mode (for clause detection)
-- Truncate all existing data (documents, chunks, entities, graph)
-- Parse all documents in `archive/`
-- Split into clause-level chunks
-- Generate embeddings (bge-large-en-v1.5)
-- Store everything in PostgreSQL
+Verify the API before ingesting documents:
 
 ```bash
-# Step 2: Build the Neo4j knowledge graph
-bash infra/run_graph_migration.sh
+curl http://127.0.0.1:8000/health
 ```
 
-This will:
-- Clear the existing graph
-- Run Qwen3-4B to extract entities and relationships from chunks
-- Build Policy, Clause, Role, Process, Regulation, and Threshold nodes
-- Create relationships (PART_OF, CAN_APPROVE, MAPS_TO, etc.)
-- Restart Qwen3-8B for query serving
+### Hosted API Mode
 
-### Single Document Upload (via UI)
+With `LLM_PROVIDER=api`, PostgreSQL, Neo4j, FastAPI, Streamlit, and the
+ingestion worker start normally. Hosted API calls are used for clause detection,
+classification, graph extraction, and answers. Local llama.cpp and Qwen GGUF
+files are not required.
 
-1. Open http://localhost:8501
-2. Log in as `admin` / `password123`
-3. Use the Upload button to upload a `.docx` or `.pdf` file
-4. The ingestion worker processes it in the background
+### Local llama.cpp Mode
 
-### Single Document Upload (via API)
+With `LLM_PROVIDER=local`, `start_codex.sh` also starts the local Qwen3-8B and
+Qwen3-4B llama.cpp servers. Verify both servers before ingestion:
 
 ```bash
-# Get a token
-TOKEN=$(curl -s -X POST http://localhost:8000/login \
+curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8081/health
+```
+
+### Recommended Document Ingestion: UI or API
+
+The ingestion worker processes database records created by an explicit upload.
+It does not watch the `archive/` directory automatically.
+
+Using the UI:
+
+1. Open `http://127.0.0.1:8501`.
+2. Sign in with an admin account.
+3. Upload a DOCX or PDF file.
+4. Wait for the ingestion worker to process it.
+5. Check the ingestion status and refresh the search index.
+
+Using the API:
+
+```bash
+TOKEN=$(curl -s -X POST http://127.0.0.1:8000/login \
   -d "username=admin&password=password123" \
-  | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
+  | python -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
-# Upload
-curl -X POST http://localhost:8000/v1/ingest \
+curl -X POST http://127.0.0.1:8000/v1/ingest \
   -H "Authorization: Bearer $TOKEN" \
   -F "file=@/path/to/policy.docx"
+
+curl http://127.0.0.1:8000/v1/ingestion/status \
+  -H "Authorization: Bearer $TOKEN"
+
+curl -X POST http://127.0.0.1:8000/admin/refresh-index \
+  -H "Authorization: Bearer $TOKEN"
 ```
+
+The worker performs parsing, clause detection, chunking, embedding, graph
+generation, and database persistence for each uploaded document.
+
+### Full Batch Reset and Migration
+
+Use this workflow only for a new corpus or when you intentionally want to
+delete all existing policy data. Place DOCX/PDF files in `archive/`, then run:
+
+```bash
+bash infra/reset_and_reingest.sh --reset
+bash infra/run_graph_migration.sh --reset
+```
+
+Both `--reset` flags are mandatory and destructive. The first command clears
+PostgreSQL data and ingests the archive. The second clears and rebuilds Neo4j.
+This workflow requires local llama.cpp mode because the scripts start the local
+Qwen graph server.
+
+### Incremental Batch Ingestion
+
+For additional archive documents without deleting existing data:
+
+```bash
+source .venv/bin/activate
+python services/ingestion/ingest.py
+python services/ingestion/migrate_to_neo4j.py --incremental
+curl -X POST http://127.0.0.1:8000/admin/refresh-index \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+For hosted API mode, prefer the UI/API upload workflow above. It uses the
+configured provider and keeps ingestion state in PostgreSQL.
 
 ### Ingestion Pipeline Details
 
@@ -299,19 +355,17 @@ archive/*.docx
 
 ### Adding New Documents After Initial Ingestion
 
-```bash
-# 1. Drop new .docx/.pdf files into archive/
+For hosted API mode, upload each new document through the UI or
+`POST /v1/ingest`; the worker uses the configured hosted provider.
 
-# 2. Run ingestion (does NOT delete existing data — incremental)
+For local batch mode, place new DOCX/PDF files in `archive/` and run:
+
+```bash
 source .venv/bin/activate
 python services/ingestion/ingest.py
-
-# 3. Refresh the BM25 search index
-curl -X POST http://localhost:8000/admin/refresh-index \
-  -H "Authorization: Bearer <admin_token>"
-
-# 4. Update the knowledge graph (incremental)
 python services/ingestion/migrate_to_neo4j.py --incremental
+curl -X POST http://127.0.0.1:8000/admin/refresh-index \
+  -H "Authorization: Bearer <admin_token>"
 ```
 
 ---
@@ -320,18 +374,18 @@ python services/ingestion/migrate_to_neo4j.py --incremental
 
 ### Via Streamlit UI
 
-Open http://localhost:8501 and log in. Ask questions in natural language.
+Open `http://127.0.0.1:8501` and log in. Ask questions in natural language.
 
 ### Via API
 
 ```bash
 # Login
-TOKEN=$(curl -s -X POST http://localhost:8000/login \
+TOKEN=$(curl -s -X POST http://127.0.0.1:8000/login \
   -d "username=admin&password=password123" \
   | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
 # Ask a question
-curl -X POST http://localhost:8000/query \
+curl -X POST http://127.0.0.1:8000/query \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"question": "Who can approve a purchase over $10,000?", "search_mode": "hybrid"}'
@@ -486,18 +540,18 @@ codex/
 ## Useful Commands
 
 ```bash
-# Full reset and re-ingestion
-bash infra/reset_and_reingest.sh
-bash infra/run_graph_migration.sh
+# Full destructive reset and re-ingestion
+bash infra/reset_and_reingest.sh --reset
+bash infra/run_graph_migration.sh --reset
 
 # Start everything locally
 bash infra/start_codex.sh
 
 # Refresh BM25 index after ingestion
-curl -X POST http://localhost:8000/admin/refresh-index \
+curl -X POST http://127.0.0.1:8000/admin/refresh-index \
   -H "Authorization: Bearer <admin_token>"
 
 # Check ingestion status
-curl http://localhost:8000/v1/ingestion/status \
+curl http://127.0.0.1:8000/v1/ingestion/status \
   -H "Authorization: Bearer <admin_token>"
 ```
