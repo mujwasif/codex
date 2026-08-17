@@ -8,14 +8,15 @@ import importlib
 import importlib.metadata
 import os
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 try:
     from packaging.requirements import Requirement
 except ImportError:
-    print("ERROR: packaging is required to run the dependency checker", file=sys.stderr)
-    raise SystemExit(2)
+    Requirement = None
 
 IMPORT_NAMES = {
     "python-docx": "docx",
@@ -29,6 +30,8 @@ IMPORT_NAMES = {
 
 
 def requirements(path: Path):
+    if Requirement is None:
+        raise RuntimeError("packaging is not installed")
     for raw in path.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or line.startswith("--"):
@@ -36,13 +39,54 @@ def requirements(path: Path):
         yield Requirement(line)
 
 
+def pip_install(root: Path, cuda: bool, quiet: bool) -> bool:
+    python = sys.executable
+    if not quiet:
+        print("Installing missing Codex Python dependencies...")
+    command = [python, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]
+    if subprocess.run(command, check=False).returncode != 0:
+        return False
+    requirements_file = root / "requirements.txt"
+    if cuda:
+        with tempfile.NamedTemporaryFile("w", suffix="-requirements.txt", delete=False) as handle:
+            temp_path = Path(handle.name)
+            for line in requirements_file.read_text().splitlines():
+                if line.startswith("--extra-index-url") or line.startswith("torch=="):
+                    continue
+                handle.write(line + "\n")
+        try:
+            commands = [
+                [python, "-m", "pip", "install", "-r", str(temp_path)],
+                [python, "-m", "pip", "install", "-r", str(root / "requirements-cuda.txt")],
+            ]
+            return all(subprocess.run(cmd, check=False).returncode == 0 for cmd in commands)
+        finally:
+            temp_path.unlink(missing_ok=True)
+    return subprocess.run(
+        [python, "-m", "pip", "install", "-r", str(requirements_file)],
+        check=False,
+    ).returncode == 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Only report problems; do not install missing packages",
+    )
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     req_path = root / "requirements.txt"
-    failures = 0
+
+    global Requirement
+    if Requirement is None:
+        if args.check_only or not pip_install(root, False, args.quiet):
+            print("ERROR: packaging is required to run the dependency checker", file=sys.stderr)
+            return 2
+        from packaging.requirements import Requirement as ParsedRequirement
+        Requirement = ParsedRequirement
 
     if sys.version_info < (3, 10):
         print("FAIL Python: Python 3.10+ is required")
@@ -50,38 +94,44 @@ def main() -> int:
     if not args.quiet:
         print(f"Python: {sys.executable} ({sys.version.split()[0]})")
 
-    for requirement in requirements(req_path):
-        name = requirement.name
-        if name == "torch" and os.getenv("CODEX_CUDA", "false").lower() == "true":
-            requirement = next(
-                req for req in requirements(root / "requirements-cuda.txt") if req.name == "torch"
-            )
+    def check() -> int:
+        failures = 0
+        for requirement in requirements(req_path):
+            name = requirement.name
+            if name == "torch" and os.getenv("CODEX_CUDA", "false").lower() == "true":
+                requirement = next(req for req in requirements(root / "requirements-cuda.txt") if req.name == "torch")
+            try:
+                installed = importlib.metadata.version(name)
+            except importlib.metadata.PackageNotFoundError:
+                print(f"MISSING {name} ({requirement})")
+                failures += 1
+                continue
+            if requirement.specifier and installed not in requirement.specifier:
+                print(f"WRONG VERSION {name}: installed {installed}, need {requirement.specifier}")
+                failures += 1
+                continue
+            module = IMPORT_NAMES.get(name, re.sub(r"[-.]", "_", name))
+            try:
+                importlib.import_module(module)
+            except Exception as exc:
+                print(f"IMPORT FAILED {name} ({module}): {exc}")
+                failures += 1
+                continue
+            if not args.quiet:
+                print(f"OK {name}=={installed}")
         try:
-            installed = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            print(f"MISSING {name} ({requirement})")
-            failures += 1
-            continue
-        if requirement.specifier and installed not in requirement.specifier:
-            print(f"WRONG VERSION {name}: installed {installed}, need {requirement.specifier}")
-            failures += 1
-            continue
-        module = IMPORT_NAMES.get(name, re.sub(r"[-.]", "_", name))
-        try:
-            importlib.import_module(module)
+            import torch
+            print(f"CUDA: {'available' if torch.cuda.is_available() else 'not available'} ({torch.__version__})")
         except Exception as exc:
-            print(f"IMPORT FAILED {name} ({module}): {exc}")
+            print(f"CUDA CHECK FAILED: {exc}")
             failures += 1
-            continue
-        if not args.quiet:
-            print(f"OK {name}=={installed}")
+        return failures
 
-    try:
-        import torch
-        print(f"CUDA: {'available' if torch.cuda.is_available() else 'not available'} ({torch.__version__})")
-    except Exception as exc:
-        print(f"CUDA CHECK FAILED: {exc}")
-        failures += 1
+    failures = check()
+    if failures and not args.check_only:
+        cuda = os.getenv("CODEX_CUDA", "false").lower() == "true"
+        if pip_install(root, cuda, args.quiet):
+            failures = check()
 
     if failures:
         print(f"Dependency check failed: {failures} issue(s).", file=sys.stderr)

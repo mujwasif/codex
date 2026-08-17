@@ -163,16 +163,24 @@ CODEX_CUDA=true bash infra/setup_venv.sh
 The setup script creates `codex/.venv` and does not modify virtualenvs outside
 the repository.
 
-### 6. Validate Dependencies
+### 6. Validate and Repair Dependencies
 
 ```bash
 python infra/check_dependencies.py
 ```
 
-The command must report:
+The command checks every package in `requirements.txt`, installs missing or
+incompatible Python packages automatically, verifies imports, and runs
+`pip check`. It must report:
 
 ```text
 All Codex Python dependencies are installed and importable.
+```
+
+To only report problems without installing anything:
+
+```bash
+python infra/check_dependencies.py --check-only
 ```
 
 ### 7. Start Codex
@@ -193,6 +201,16 @@ curl http://127.0.0.1:8000/health
 Open the UI at `http://127.0.0.1:8501`.
 
 Logs are stored in `logs/`.
+
+Verify PostgreSQL with the same credentials used by Codex:
+
+```bash
+source infra/common.sh
+psql "$DATABASE_URL" -tAc "SELECT current_user, current_database()"
+```
+
+The expected user is `codex_admin`. A successful API health response alone does
+not prove that PostgreSQL or Neo4j authentication is working.
 
 ### Stop Codex
 
@@ -512,6 +530,15 @@ python tests/test_rbac.py
 python tests/test_retrieval_quality.py
 python tests/test_slack_integration.py
 ```
+
+The chunking fixture tests require the referenced password-management document
+to exist at `archive/UnderDefense MAXI - Password management policy.docx`. If
+that document is not included in the checkout, those fixture tests are skipped
+or reported as unavailable; this is separate from dependency validation.
+
+`tests/test_retrieval_quality.py` requires a populated, current policy corpus.
+Run ingestion and refresh the BM25 index before treating retrieval-quality
+failures as code failures.
 
 ---
 
