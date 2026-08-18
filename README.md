@@ -6,202 +6,40 @@ Enterprise document intelligence system that ingests corporate policy documents 
 
 ## Architecture
 
-```
-                    INGESTION (offline)
-                    ===================
-archive/*.docx
-  → doc_parser.py          (parse DOCX/PDF structure)
-  → clause_detector.py     (split into individual clauses via hosted LLM API)
-  → structure_chunker.py   (clause-level chunks with overlap)
-  → ingest.py              (embed with bge-large-en-v1.5, store in PostgreSQL)
-  → migrate_to_neo4j.py    (build knowledge graph via LLM)
+Get Codex running in 4 simple steps on a new Ubuntu/Debian machine:
 
-                    QUERY (online)
-                    ==============
-User: "Who can approve a purchase over $10,000?"
-  → /query endpoint         (authenticate, orchestrate pipeline)
-  → search.py               (vector + BM25 → RRF fusion → CrossEncoder rerank → top 5)
-  → orchestrator.py         (intent classification → specialized agent pipeline)
-  → reasoner.py             (hosted LLM generates grounded answer with citations)
-  → verifier.py             (regex check — all citations match retrieved chunks?)
-  → confidence.py           (multi-signal confidence score as percentage)
-  → Response: {answer, verdict, confidence, citations, search_mode}
-```
+### 1. Install System Requirements
+Ensure you have Python 3.10+, PostgreSQL 16+ (with `pgvector`), Neo4j 5.26+, `curl`, and `git` installed.
 
----
-
-## Prerequisites
-
-| Component | Version | Purpose |
-|-----------|---------|---------|
-| Python | 3.12+ | Runtime |
-| PostgreSQL + pgvector | 16+ | Vector storage + chunk metadata |
-| Neo4j | 5.26+ | Knowledge graph |
-| Hosted LLM API | OpenAI-compatible | Clause detection, graph extraction, and answers |
-
----
-
-## Recommended Setup
-
-Codex runs natively and uses a hosted OpenAI-compatible LLM API. Local llama.cpp,
-Qwen GGUF files, and CUDA model serving are not required.
-
-For a new Ubuntu/Debian machine, the complete installer is:
-
+### 2. Clone and Setup
 ```bash
 git clone <repository-url>
 cd codex
 bash infra/install_codex.sh
-```
-
-The installer creates `.env`, installs system and Python dependencies,
-initializes the databases, and validates the hosted API connection.
-
-### 1. Install System Requirements
-
-Required on the target machine:
-
-- Python 3.10+
-- PostgreSQL with the `pgvector` extension
-- Neo4j 5.26+
-- `curl`
-- `git`
-
-The hosted LLM API is the only LLM runtime requirement.
-
-### 2. Clone and Configure
-
-```bash
-git clone <repository-url>
-cd codex
 cp .env.example .env
 ```
 
-Edit `.env` with the values for the target machine.
-
-For hosted API mode:
-
-```env
-LLM_PROVIDER=api
-LLM_API_KEY=optional_api_key
-LLM_BASE_URL=https://funkash.eu1.netbird.services/llm/v1
-LLM_MODEL=hf.co/Qwen/Qwen3-8B-GGUF:Q4_K_M
-LLM_INGESTION_MODEL=hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL
-```
-
-### 3. Configure PostgreSQL
-
-If PostgreSQL is already installed and running, configure it explicitly:
-
-```env
-PG_BIN=/path/to/postgresql/bin
-PG_DATA=.data/postgres
-POSTGRES_HOST=127.0.0.1
-POSTGRES_PORT=5432
-POSTGRES_USER=codex_admin
-POSTGRES_PASSWORD=your_password
-POSTGRES_DB=codex_db
-DATABASE_URL=postgresql://codex_admin:your_password@127.0.0.1:5432/codex_db
-```
-
-When using a local PostgreSQL data directory, startup initializes the cluster,
-creates the database and user, enables `pgvector`, and loads the schema.
-
-### 4. Configure Neo4j
-
-```env
-NEO4J_HOME=/path/to/neo4j
-NEO4J_URI=bolt://127.0.0.1:7687
-NEO4J_USER=neo4j
-NEO4J_PASS=your_neo4j_password
-```
-
-If Neo4j is managed externally, start it before Codex. If it is installed
-locally, `start_codex.sh` attempts to start it.
-
-### 5. Create the Codex Environment
-
-Do not use an external virtualenv. Create the project-local environment:
-
-```bash
-bash infra/setup_venv.sh
-source .venv/bin/activate
-```
-
-The setup script creates `codex/.venv` and does not modify virtualenvs outside
-the repository.
-
-### 6. Validate and Repair Dependencies
-
-```bash
-python infra/check_dependencies.py
-```
-
-The command checks every package in `requirements.txt`, installs missing or
-incompatible Python packages automatically, verifies imports, and runs
-`pip check`. It must report:
-
-```text
-All Codex Python dependencies are installed and importable.
-```
-
-To only report problems without installing anything:
-
-```bash
-python infra/check_dependencies.py --check-only
-```
-
-### 7. Start Codex
-
+### 3. Launch the System
 ```bash
 bash infra/start_codex.sh
 ```
+This starts the PostgreSQL database (in `.data/postgres`), Neo4j, the FastAPI backend, the Streamlit UI, and the ingestion worker.
 
-This starts PostgreSQL, Neo4j, FastAPI, Streamlit, and the ingestion worker.
-All LLM generation uses the configured hosted API endpoint.
+### 4. Access and Login
+- **UI URL**: `http://127.0.0.1:8501`
+- **API URL**: `http://127.0.0.1:8000`
 
-### 8. Verify
+**Default Mock Credentials:**
+| Username | Password | Access Level | Department |
+|----------|----------|-------------|------------|
+| `admin` | `password123` | 3 (Admin) | IT |
+| `manager` | `password123` | 2 (Manager) | Finance |
+| `employee` | `password123` | 1 (Employee) | HR |
 
-```bash
-curl http://127.0.0.1:8000/health
-```
+---
 
-Open the UI at `http://127.0.0.1:8501`.
-
-Logs are stored in `logs/`.
-
-Verify PostgreSQL with the same credentials used by Codex:
-
-```bash
-source infra/common.sh
-psql "$DATABASE_URL" -tAc "SELECT current_user, current_database()"
-```
-
-The expected user is `codex_admin`. A successful API health response alone does
-not prove that PostgreSQL or Neo4j authentication is working.
-
-Development users are seeded by default when `SEED_DEFAULT_USERS=true`:
-
-| Username | Password | Access level |
-|----------|----------|--------------|
-| `admin` | `password123` | 3 |
-| `manager` | `password123` | 2 |
-| `employee` | `password123` | 1 |
-
-Disable default user seeding and create managed accounts before production:
-
-```env
-SEED_DEFAULT_USERS=false
-```
-
-### Stop Codex
-
-```bash
-bash infra/unused/stop.sh
-```
-
-Important: `.env` contains passwords and API keys. Never commit it. Rotate any
-credentials that have previously been exposed in a local `.env` file.
+## Architecture
+...
 
 ---
 
