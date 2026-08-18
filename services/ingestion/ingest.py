@@ -5,15 +5,12 @@ from datetime import datetime
 from sqlalchemy import text
 from sentence_transformers import SentenceTransformer
 
-from packages.shared.db import get_db_session, init_db
-from packages.shared.models import Document as DocumentModel, Chunk
-from packages.shared.access_control import infer_access_level
-from packages.shared.doc_parser import parse_document_structure
-from services.ingestion.structure_chunker import chunk_document_clauses, get_chunk_stats
+from codex.packages.shared.db import get_db_session, init_db
+from codex.packages.shared.models import Document as DocumentModel, Chunk
+from codex.packages.shared.access_control import infer_access_level
+from codex.services.ingestion.structure_chunker import chunk_document_clauses, get_chunk_stats
+from codex.packages.shared.config import (
 
-# Configuration
-MODEL_NAME = 'BAAI/bge-large-en-v1.5'  # 1024 dimensions, high quality semantic embeddings
-from packages.shared.config import (
     ARCHIVE_DIR,
     EMBEDDING_DEVICE,
     MAX_CLAUSE_TOKENS,

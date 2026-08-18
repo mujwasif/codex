@@ -26,12 +26,12 @@ from typing import List, Optional
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import text
 
-from packages.shared.db import get_db_session, init_db
-from packages.shared.models import Document, Chunk
-from packages.shared.access_control import infer_access_level
-from packages.shared.doc_parser import parse_document_structure
-from services.ingestion.structure_chunker import chunk_document_clauses, get_chunk_stats
-from packages.shared.config import (
+from codex.packages.shared.db import get_db_session, init_db
+from codex.packages.shared.models import Document, Chunk
+from codex.packages.shared.access_control import infer_access_level
+from codex.services.ingestion.structure_chunker import chunk_document_clauses, get_chunk_stats
+from codex.packages.shared.config import (
+
     CODEX_API_URL,
     CLAIM_INTERVAL as CONFIG_CLAIM_INTERVAL,
     GRAPH_BATCH_SIZE as CONFIG_GRAPH_BATCH_SIZE,

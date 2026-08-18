@@ -2,7 +2,7 @@ from typing import List, Dict
 from sentence_transformers import CrossEncoder, SentenceTransformer
 from sqlalchemy import text, func
 from packages.shared.db import get_db_session
-from packages.shared.models import Document, Chunk, Citation, Feedback, Answer, Query
+from codex.packages.shared.models import Document, Chunk, Citation, Feedback, Answer, Query
 from packages.shared.chunk_filter import is_low_info
 
 # Configuration
