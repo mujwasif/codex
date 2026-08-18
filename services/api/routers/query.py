@@ -21,14 +21,21 @@ from codex.packages.shared.config import HISTORY_MAX_TOKENS, HISTORY_TURNS
 
 router = APIRouter(tags=["query"])
 
-def _load_user_history(session, user_id: str, limit: int = HISTORY_TURNS):
+def _load_user_history(session, user_id_or_name: str, limit: int = HISTORY_TURNS):
     """
     Load the last N turns for a user as (question, answer) pairs,
     ordered oldest first (so they can be prepended in conversation order).
     """
+    # Resolve username to UUID if necessary
+    user_uuid = user_id_or_name
+    if len(user_id_or_name) < 32:  # Simple heuristic: if it's not a UUID, it's a username
+        user = session.query(User).filter(User.username == user_id_or_name).first()
+        if user:
+            user_uuid = str(user.id)
+
     q_rows = (
         session.query(Query)
-        .filter(Query.user_id == user_id)
+        .filter(Query.user_id == user_uuid)
         .options(joinedload(Query.answers))
         .order_by(Query.created_at.desc())
         .limit(limit)
@@ -263,9 +270,13 @@ async def get_query_history(
 
     try:
         with get_db_session() as session:
+            # Resolve username to UUID
+            user = session.query(User).filter(User.username == username).first()
+            user_uuid = str(user.id) if user else username
+
             queries = (
                 session.query(Query)
-                .filter(Query.user_id == username)
+                .filter(Query.user_id == user_uuid)
                 .options(
                     joinedload(Query.answers).joinedload(Answer.citations)
                     .joinedload(Citation.chunk).joinedload(Chunk.document)

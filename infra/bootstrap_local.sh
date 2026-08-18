@@ -39,4 +39,5 @@ if ! admin_psql -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$POST
 fi
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$CODEX_DIR/infra/db/init.sql"
+"$PYTHON_BIN" "$CODEX_DIR/infra/seed_users.py"
 echo "PostgreSQL and pgvector are ready: $POSTGRES_DB"

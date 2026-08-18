@@ -95,7 +95,7 @@ If PostgreSQL is already installed and running, configure it explicitly:
 
 ```env
 PG_BIN=/path/to/postgresql/bin
-PG_DATA=/path/to/postgresql/data
+PG_DATA=.data/postgres
 POSTGRES_HOST=127.0.0.1
 POSTGRES_PORT=5432
 POSTGRES_USER=codex_admin
@@ -179,6 +179,20 @@ psql "$DATABASE_URL" -tAc "SELECT current_user, current_database()"
 
 The expected user is `codex_admin`. A successful API health response alone does
 not prove that PostgreSQL or Neo4j authentication is working.
+
+Development users are seeded by default when `SEED_DEFAULT_USERS=true`:
+
+| Username | Password | Access level |
+|----------|----------|--------------|
+| `admin` | `password123` | 3 |
+| `manager` | `password123` | 2 |
+| `employee` | `password123` | 1 |
+
+Disable default user seeding and create managed accounts before production:
+
+```env
+SEED_DEFAULT_USERS=false
+```
 
 ### Stop Codex
 
