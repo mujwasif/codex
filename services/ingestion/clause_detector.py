@@ -203,8 +203,7 @@ def detect_clauses(
     
     # Step 1: Try LLM
     if use_llm and llama_url is None:
-        from packages.shared.config import LLAMA_4B_URL
-        llama_url = f"{LLAMA_4B_URL}/v1/chat/completions"
+        llama_url = None
     if use_llm and llama_url:
         llm_clauses = detect_clauses_llm(text, llama_url)
         if llm_clauses:

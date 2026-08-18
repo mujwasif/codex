@@ -1,7 +1,7 @@
 """
 Connection Pool
 
-Manages pooled connections for Neo4j and HTTP (llama.cpp).
+Manages pooled connections for Neo4j and the hosted LLM API.
 Created once at startup, shared across all agents.
 """
 

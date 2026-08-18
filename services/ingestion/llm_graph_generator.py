@@ -19,10 +19,9 @@ import time
 from typing import List, Dict, Optional
 from services.agents.tools.llm_tools import llm_generate, QWEN3_4B_MODEL
 
-from packages.shared.config import LLAMA_4B_URL, QWEN3_4B_MODEL
+from packages.shared.config import LLM_INGESTION_MODEL
 
-LLAMA_URL = f"{LLAMA_4B_URL}/v1/chat/completions"
-MODEL_NAME = QWEN3_4B_MODEL
+MODEL_NAME = LLM_INGESTION_MODEL
 
 ALLOWED_LABELS = {"Policy", "Clause", "Role", "Department", "Process", "Threshold", "Regulation"}
 ALLOWED_REL_TYPES = {"PART_OF", "CAN_APPROVE", "REQUIRES_THRESHOLD", "GOVERNS", "MAPS_TO", "BELONGS_TO", "CONFLICTS_WITH", "SUPERSEDES"}

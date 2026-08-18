@@ -20,7 +20,7 @@ async def health_check():
     """Check system health."""
     db_status = "unknown"
     reasoner_status = "unknown"
-    qwen_status = "unknown"
+    ingestion_llm_status = "unknown"
 
     try:
         with get_db_session() as session:
@@ -30,32 +30,22 @@ async def health_check():
         db_status = "unavailable"
 
     try:
-        import requests
-        from packages.shared.config import LLM_API_KEY, LLM_BASE_URL, LLAMA_8B_URL, get_llm_provider
-        if get_llm_provider() == "api":
-            resp = requests.get(f"{LLM_BASE_URL}/models", headers={"Authorization": f"Bearer {LLM_API_KEY}"}, timeout=5)
-            reasoner_status = "healthy" if resp.status_code == 200 else "unhealthy"
-        else:
-            resp = requests.get(f"{LLAMA_8B_URL}/health", timeout=5)
-            reasoner_status = "healthy" if resp.status_code == 200 else "unhealthy"
+        from packages.shared.llm_client import health_check
+        reasoner_status = "healthy" if health_check() else "unhealthy"
     except Exception:
         reasoner_status = "unavailable"
 
     try:
-        from packages.shared.config import LLM_API_KEY, LLAMA_4B_URL, get_llm_provider
-        if get_llm_provider() == "api":
-            qwen_status = "configured" if LLM_API_KEY else "unconfigured"
-        else:
-            resp = requests.get(f"{LLAMA_4B_URL}/health", timeout=5)
-            qwen_status = "healthy" if resp.status_code == 200 else "unhealthy"
+        from packages.shared.config import LLM_BASE_URL
+        ingestion_llm_status = "configured" if LLM_BASE_URL else "unconfigured"
     except Exception:
-        qwen_status = "unavailable"
+        ingestion_llm_status = "unavailable"
 
     return HealthResponse(
         status="healthy" if db_status == "healthy" else "degraded",
         database=db_status,
         llama_server=reasoner_status,
-        qwen_server=qwen_status,
+        qwen_server=ingestion_llm_status,
     )
 
 

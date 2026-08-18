@@ -11,7 +11,7 @@ Enterprise document intelligence system that ingests corporate policy documents 
                     ===================
 archive/*.docx
   → doc_parser.py          (parse DOCX/PDF structure)
-  → clause_detector.py     (split into individual clauses via Qwen3-4B LLM)
+  → clause_detector.py     (split into individual clauses via hosted LLM API)
   → structure_chunker.py   (clause-level chunks with overlap)
   → ingest.py              (embed with bge-large-en-v1.5, store in PostgreSQL)
   → migrate_to_neo4j.py    (build knowledge graph via LLM)
@@ -22,7 +22,7 @@ User: "Who can approve a purchase over $10,000?"
   → /query endpoint         (authenticate, orchestrate pipeline)
   → search.py               (vector + BM25 → RRF fusion → CrossEncoder rerank → top 5)
   → orchestrator.py         (intent classification → specialized agent pipeline)
-  → reasoner.py             (Qwen3-8B generates grounded answer with citations)
+  → reasoner.py             (hosted LLM generates grounded answer with citations)
   → verifier.py             (regex check — all citations match retrieved chunks?)
   → confidence.py           (multi-signal confidence score as percentage)
   → Response: {answer, verdict, confidence, citations, search_mode}
@@ -37,31 +37,25 @@ User: "Who can approve a purchase over $10,000?"
 | Python | 3.12+ | Runtime |
 | PostgreSQL + pgvector | 16+ | Vector storage + chunk metadata |
 | Neo4j | 5.26+ | Knowledge graph |
-| llama.cpp | latest | LLM inference (Qwen3-8B + Qwen3-4B) |
-| NVIDIA GPU | RTX 4060 8GB+ | GPU acceleration for LLMs |
-| CUDA | 12.1+ | GPU driver compatibility |
+| Hosted LLM API | OpenAI-compatible | Clause detection, graph extraction, and answers |
 
 ---
 
 ## Recommended Setup
 
-Codex runs natively and supports three LLM modes:
-
-- `api`: hosted LLM using an API key
-- `local`: llama.cpp with local Qwen models
-- `auto`: uses API mode when a key exists, otherwise local mode
+Codex runs natively and uses a hosted OpenAI-compatible LLM API. Local llama.cpp,
+Qwen GGUF files, and CUDA model serving are not required.
 
 For a new Ubuntu/Debian machine, the complete installer is:
 
 ```bash
 git clone <repository-url>
 cd codex
-bash infra/install_codex.sh --llm api
+bash infra/install_codex.sh
 ```
 
-Use `--llm local` for llama.cpp and local Qwen models, or `--llm auto` to
-choose automatically. The installer creates `.env`, installs system and
-Python dependencies, initializes the databases, and validates the deployment.
+The installer creates `.env`, installs system and Python dependencies,
+initializes the databases, and validates the hosted API connection.
 
 ### 1. Install System Requirements
 
@@ -73,11 +67,7 @@ Required on the target machine:
 - `curl`
 - `git`
 
-For local LLM mode, the installer builds llama.cpp and downloads the required
-models when their download URLs are configured in `.env`:
-
-- Qwen3-8B GGUF model
-- Qwen3-4B GGUF model
+The hosted LLM API is the only LLM runtime requirement.
 
 ### 2. Clone and Configure
 
@@ -93,26 +83,10 @@ For hosted API mode:
 
 ```env
 LLM_PROVIDER=api
-LLM_API_KEY=your_api_key
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
-LLM_INGESTION_MODEL=gpt-4o-mini
-```
-
-For local llama.cpp mode:
-
-```env
-LLM_PROVIDER=local
-LLAMA_CPP_BIN=/path/to/llama-server
-MODELS_DIR=/path/to/models
-QWEN3_8B_MODEL_PATH=/path/to/models/Qwen3-8B-Q4_K_M.gguf
-QWEN3_4B_MODEL_PATH=/path/to/models/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf
-```
-
-For automatic selection:
-
-```env
-LLM_PROVIDER=auto
+LLM_API_KEY=optional_api_key
+LLM_BASE_URL=https://funkash.eu1.netbird.services/llm/v1
+LLM_MODEL=hf.co/Qwen/Qwen3-8B-GGUF:Q4_K_M
+LLM_INGESTION_MODEL=hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL
 ```
 
 ### 3. Configure PostgreSQL
@@ -154,12 +128,6 @@ bash infra/setup_venv.sh
 source .venv/bin/activate
 ```
 
-For CUDA-enabled PyTorch:
-
-```bash
-CODEX_CUDA=true bash infra/setup_venv.sh
-```
-
 The setup script creates `codex/.venv` and does not modify virtualenvs outside
 the repository.
 
@@ -190,7 +158,7 @@ bash infra/start_codex.sh
 ```
 
 This starts PostgreSQL, Neo4j, FastAPI, Streamlit, and the ingestion worker.
-Local llama.cpp servers start only when the resolved LLM mode is `local`.
+All LLM generation uses the configured hosted API endpoint.
 
 ### 8. Verify
 
@@ -237,12 +205,8 @@ cp .env.example .env
 |----------|---------|-------------|
 | `DATABASE_URL` | `postgresql://codex_admin:password@127.0.0.1:5432/codex_db` | PostgreSQL connection string |
 | `NEO4J_URI` | `bolt://127.0.0.1:7687` | Neo4j Bolt connection |
-| `QWEN3_8B_MODEL_PATH` | `${MODELS_DIR}/Qwen3-8B-Q4_K_M.gguf` | Path to Qwen3-8B model |
-| `QWEN3_4B_MODEL_PATH` | `${MODELS_DIR}/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` | Path to Qwen3-4B model |
-| `LLM_8B_PORT` | `8080` | Qwen3-8B server port |
-| `LLM_4B_PORT` | `8081` | Qwen3-4B server port |
-| `GPU_LAYERS_8B` | `30` | GPU layers to offload for 8B |
-| `GPU_LAYERS_4B` | `10` | GPU layers to offload for 4B |
+| `LLM_PROVIDER` | `auto` | `api`, `local`, or automatic provider selection |
+| `LLM_API_KEY` | — | Optional API key; omit it for keyless private endpoints |
 | `API_PORT` | `8000` | FastAPI server port |
 | `UI_PORT` | `8501` | Streamlit UI port |
 | `SECRET_KEY` | — | JWT signing secret (change in production) |
@@ -271,20 +235,9 @@ curl http://127.0.0.1:8000/health
 
 ### Hosted API Mode
 
-With `LLM_PROVIDER=api`, PostgreSQL, Neo4j, FastAPI, Streamlit, and the
-ingestion worker start normally. Hosted API calls are used for clause detection,
-classification, graph extraction, and answers. Local llama.cpp and Qwen GGUF
-files are not required.
-
-### Local llama.cpp Mode
-
-With `LLM_PROVIDER=local`, `start_codex.sh` also starts the local Qwen3-8B and
-Qwen3-4B llama.cpp servers. Verify both servers before ingestion:
-
-```bash
-curl http://127.0.0.1:8080/health
-curl http://127.0.0.1:8081/health
-```
+PostgreSQL, Neo4j, FastAPI, Streamlit, and the ingestion worker start normally.
+Hosted API calls are used for clause detection, classification, graph
+extraction, and answers. Local LLM servers and model files are not required.
 
 ### Recommended Document Ingestion: UI or API
 
@@ -320,6 +273,16 @@ curl -X POST http://127.0.0.1:8000/admin/refresh-index \
 The worker performs parsing, clause detection, chunking, embedding, graph
 generation, and database persistence for each uploaded document.
 
+The authentication dependency includes `argon2-cffi`, which is required for
+admin login. If login returns a 500 error mentioning Argon2, repair the Python
+environment and restart the API:
+
+```bash
+python infra/check_dependencies.py
+bash infra/unused/stop.sh
+bash infra/start_codex.sh
+```
+
 ### Full Batch Reset and Migration
 
 Use this workflow only for a new corpus or when you intentionally want to
@@ -332,8 +295,8 @@ bash infra/run_graph_migration.sh --reset
 
 Both `--reset` flags are mandatory and destructive. The first command clears
 PostgreSQL data and ingests the archive. The second clears and rebuilds Neo4j.
-This workflow requires local llama.cpp mode because the scripts start the local
-Qwen graph server.
+This workflow uses the configured hosted API for clause detection and graph
+generation.
 
 ### Incremental Batch Ingestion
 
@@ -357,7 +320,7 @@ archive/*.docx
   │
   ├── doc_parser.py        Parse DOCX/PDF structure → sections
   │
-  ├── clause_detector.py   Split sections into individual clauses (Qwen3-4B LLM)
+  ├── clause_detector.py   Split sections into individual clauses (hosted LLM API)
   │
   ├── structure_chunker.py Clause-level chunks with 3-token overlap
   │
@@ -432,7 +395,7 @@ python -m services.chat.cli
 |---|-------|------|---------|
 | 1 | Orchestrator | `services/agents/orchestrator.py` | State machine. Classifies intent, routes to specialized agents. |
 | 2 | Retriever | `services/api/search.py` | Vector + BM25 → RRF fusion → CrossEncoder rerank → top 5 |
-| 3 | Reasoner | `services/agents/reasoner.py` | Qwen3-8B generates grounded answer with citations |
+| 3 | Reasoner | `services/agents/reasoner.py` | Hosted LLM generates grounded answer with citations |
 | 4 | Verifier | `services/agents/verifier.py` | Validates all citations against actual chunks |
 | 5 | Approval-Matrix | `services/agents/approval_agent.py` | Neo4j query for approval authority |
 | 6 | Conflict Detector | `services/agents/conflict_agent.py` | Detects contradictions in clauses |
@@ -539,6 +502,25 @@ or reported as unavailable; this is separate from dependency validation.
 `tests/test_retrieval_quality.py` requires a populated, current policy corpus.
 Run ingestion and refresh the BM25 index before treating retrieval-quality
 failures as code failures.
+
+### Upload Troubleshooting
+
+If the UI reports `500 Server Error` while uploading, check the API log first:
+
+```bash
+tail -n 100 logs/fastapi.log
+```
+
+The `CORS_ORIGINS` value in `.env` must remain valid JSON wrapped in shell
+quotes:
+
+```env
+CORS_ORIGINS='["http://127.0.0.1:8501"]'
+```
+
+After changing `.env`, restart the API before retrying the upload. A successful
+upload returns `status: queued`; the document becomes queryable only after its
+ingestion status is `ready` and graph generation is complete.
 
 ---
 

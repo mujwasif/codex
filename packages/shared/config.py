@@ -10,7 +10,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _path_env(name: str, default: Path) -> str:
-    return str(Path(os.getenv(name, str(default))).expanduser())
+    value = os.getenv(name)
+    return str(Path(value).expanduser()) if value else str(default)
 
 # ── Database ──────────────────────────────────────────────
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "127.0.0.1")
@@ -33,7 +34,7 @@ if not NEO4J_PASS and os.getenv("NEO4J_AUTH", "").startswith("neo4j/"):
     NEO4J_PASS = os.getenv("NEO4J_AUTH", "").split("/", 1)[1]
 
 # ── LLM Provider ──────────────────────────────────────────
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "auto").lower()
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "api").lower()
 LLM_API_KEY = os.getenv("LLM_API_KEY", os.getenv("OPENAI_API_KEY", ""))
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
@@ -41,18 +42,9 @@ LLM_INGESTION_MODEL = os.getenv("LLM_INGESTION_MODEL", LLM_MODEL)
 
 
 def get_llm_provider() -> str:
-    """Resolve auto mode to hosted API when a key exists, otherwise local."""
-    if LLM_PROVIDER == "auto":
-        return "api" if LLM_API_KEY else "local"
-    return LLM_PROVIDER
+    """Return the only supported hosted LLM provider."""
+    return "api"
 
-# ── Local LLM Servers (used when LLM_PROVIDER=local) ──────
-LLAMA_8B_URL = os.getenv("LLAMA_8B_URL", "http://127.0.0.1:8080")
-LLAMA_4B_URL = os.getenv("LLAMA_4B_URL", "http://127.0.0.1:8081")
-QWEN3_8B_MODEL = os.getenv("QWEN3_8B_MODEL", "Qwen3-8B-Q4_K_M.gguf")
-QWEN3_4B_MODEL = os.getenv(
-    "QWEN3_4B_MODEL", "Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf"
-)
 
 # ── API ───────────────────────────────────────────────────
 CODEX_API_URL = os.getenv("CODEX_API_URL", "http://127.0.0.1:8000")
@@ -106,7 +98,6 @@ LOG_DIR = _path_env("LOG_DIR", PROJECT_ROOT / "logs")
 STATE_DIR = _path_env("STATE_DIR", PROJECT_ROOT / ".state")
 WORKER_LOCK_PATH = _path_env("WORKER_LOCK_PATH", Path(STATE_DIR) / "ingestion_worker.pid")
 MIGRATION_STATE_FILE = _path_env("MIGRATION_STATE_FILE", Path(STATE_DIR) / "processed_docs.txt")
-LLAMA_CPP_BIN = os.getenv("LLAMA_CPP_BIN", "llama-server")
 PG_BIN = os.getenv("PG_BIN", "")
 PG_DATA = _path_env("PG_DATA", Path(DATA_DIR) / "postgres")
 NEO4J_HOME = os.getenv("NEO4J_HOME", "")

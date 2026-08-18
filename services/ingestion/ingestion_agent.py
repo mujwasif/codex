@@ -35,8 +35,8 @@ from packages.shared.config import (
     CODEX_API_URL,
     CLAIM_INTERVAL as CONFIG_CLAIM_INTERVAL,
     GRAPH_BATCH_SIZE as CONFIG_GRAPH_BATCH_SIZE,
-    LLAMA_4B_URL,
     LOG_DIR,
+    LLM_BASE_URL,
     MAX_CLAUSE_TOKENS as CONFIG_MAX_CLAUSE_TOKENS,
     OVERLAP_TOKENS as CONFIG_OVERLAP_TOKENS,
     USE_LLM_FOR_CHUNKING,
@@ -56,7 +56,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ingestion_agent")
 
-LLAMA_URL = f"{LLAMA_4B_URL}/v1/chat/completions"
 MODEL_NAME = "BAAI/bge-large-en-v1.5"
 CLAIM_INTERVAL = CONFIG_CLAIM_INTERVAL
 MAX_CLAUSE_TOKENS = CONFIG_MAX_CLAUSE_TOKENS
@@ -203,7 +202,7 @@ def process_document(doc_id: str, model: SentenceTransformer):
     try:
         chunks = chunk_document_clauses(
             sections,
-            llama_url=LLAMA_URL,
+            llama_url=None,
             max_clause_tokens=MAX_CLAUSE_TOKENS,
             overlap_tokens=OVERLAP_TOKENS,
             use_llm=USE_LLM,
@@ -371,7 +370,7 @@ def _claim_pending() -> Optional[str]:
 def run_worker():
     logger.info("=" * 50)
     logger.info("Codex Ingestion Worker starting")
-    logger.info(f"  LLM: {LLAMA_URL}")
+    logger.info("  LLM: hosted API (%s)", LLM_BASE_URL)
     logger.info(f"  Neo4j: {NEO4J_URI}")
     logger.info("  Mode: explicit queue — processes ONLY documents uploaded through the admin UI")
     logger.info("=" * 50)

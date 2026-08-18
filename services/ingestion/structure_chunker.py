@@ -29,8 +29,7 @@ def chunk_document_clauses(
         List of clause-level chunks with metadata
     """
     if use_llm and llama_url is None:
-        from packages.shared.config import LLAMA_4B_URL
-        llama_url = f"{LLAMA_4B_URL}/v1/chat/completions"
+        llama_url = None
 
     chunks = []
     clause_counter = {}

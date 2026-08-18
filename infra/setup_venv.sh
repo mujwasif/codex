@@ -20,15 +20,7 @@ fi
 
 VENV_PYTHON="$VENV_DIR/bin/python"
 "$VENV_PYTHON" -m pip install --upgrade pip setuptools wheel
-if [[ "${CODEX_CUDA:-false}" == "true" ]]; then
-    TMP_REQUIREMENTS="$(mktemp)"
-    trap 'rm -f "$TMP_REQUIREMENTS"' EXIT
-    grep -vE '^(--extra-index-url|torch==)' "$CODEX_DIR/requirements.txt" > "$TMP_REQUIREMENTS"
-    "$VENV_PYTHON" -m pip install -r "$TMP_REQUIREMENTS"
-    "$VENV_PYTHON" -m pip install -r "$CODEX_DIR/requirements-cuda.txt"
-else
-    "$VENV_PYTHON" -m pip install -r "$CODEX_DIR/requirements.txt"
-fi
+"$VENV_PYTHON" -m pip install -r "$CODEX_DIR/requirements.txt"
 SITE_PACKAGES="$($VENV_PYTHON -c 'import site; print(site.getsitepackages()[0])')"
 printf '%s\n%s\n' "$CODEX_DIR" "$(dirname "$CODEX_DIR")" > "$SITE_PACKAGES/codex_local.pth"
 "$VENV_PYTHON" "$CODEX_DIR/infra/check_dependencies.py"

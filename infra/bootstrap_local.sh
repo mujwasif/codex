@@ -12,10 +12,13 @@ require_command createdb
 mkdir -p "$PG_DATA"
 
 admin_psql() {
-    if sudo -u postgres psql "$@" >/dev/null 2>&1; then
-        sudo -u postgres psql "$@"
+    local local_admin="${PG_LOCAL_ADMIN_USER:-${USER:-postgres}}"
+    if psql -p "$PG_PORT" -U "$local_admin" "$@" >/dev/null 2>&1; then
+        psql -p "$PG_PORT" -U "$local_admin" "$@"
+    elif sudo -u postgres psql -p "$PG_PORT" "$@" >/dev/null 2>&1; then
+        sudo -u postgres psql -p "$PG_PORT" "$@"
     else
-        psql -U "${PG_ADMIN_USER:-postgres}" "$@"
+        psql -p "$PG_PORT" -U "${PG_ADMIN_USER:-postgres}" "$@"
     fi
 }
 

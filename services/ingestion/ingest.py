@@ -16,12 +16,10 @@ MODEL_NAME = 'BAAI/bge-large-en-v1.5'  # 1024 dimensions, high quality semantic 
 from packages.shared.config import (
     ARCHIVE_DIR,
     EMBEDDING_DEVICE,
-    LLAMA_4B_URL,
     MAX_CLAUSE_TOKENS,
     OVERLAP_TOKENS,
     USE_LLM_FOR_CHUNKING,
 )
-LLAMA_URL = f"{LLAMA_4B_URL}/v1/chat/completions"
 MAX_CLAUSE_TOKENS = 200
 OVERLAP_TOKENS = 20
 USE_LLM = USE_LLM_FOR_CHUNKING
@@ -110,7 +108,7 @@ def ingest_file(file_path: str, session, force: bool = False):
         print(f"  Chunking {filename} with clause-level detection...")
         chunks = chunk_document_clauses(
             sections,
-            llama_url=LLAMA_URL,
+            llama_url=None,
             max_clause_tokens=MAX_CLAUSE_TOKENS,
             overlap_tokens=OVERLAP_TOKENS,
             use_llm=USE_LLM

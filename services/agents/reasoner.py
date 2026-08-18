@@ -55,4 +55,4 @@ def generate_grounded_answer(query, context_chunks, feedback_guidance=""):
     if result.success:
         return result.data
     else:
-        return f"Error connecting to llama.cpp server: {result.error}"
+        return f"Error connecting to hosted LLM API: {result.error}"

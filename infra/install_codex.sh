@@ -5,29 +5,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CODEX_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="$CODEX_DIR/.env"
-LLM_MODE="auto"
-CUDA="false"
 
 usage() {
     cat <<'EOF'
-Usage: bash infra/install_codex.sh [--llm api|local|auto] [--cuda]
+Usage: bash infra/install_codex.sh
 
-Options:
-  --llm MODE   Select hosted API, local llama.cpp, or automatic mode.
-  --cuda       Install the CUDA PyTorch variant and use CUDA local defaults.
+The installer configures Codex for a hosted OpenAI-compatible LLM API.
 EOF
 }
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --llm) LLM_MODE="${2:?Missing value for --llm}"; shift 2 ;;
-        --cuda) CUDA="true"; shift ;;
-        -h|--help) usage; exit 0 ;;
-        *) echo "Unknown option: $1" >&2; usage; exit 2 ;;
-    esac
-done
-
-case "$LLM_MODE" in api|local|auto) ;; *) echo "Invalid LLM mode: $LLM_MODE" >&2; exit 2 ;; esac
+[[ $# -eq 0 ]] || { usage; exit 2; }
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 info() { printf '\n==> %s\n' "$*"; }
@@ -135,7 +122,7 @@ neo_password="$existing_neo_password"
 [[ -n "$neo_password" ]] || die "Neo4j password cannot be empty"
 secret_key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
 
-set_env LLM_PROVIDER "$LLM_MODE"
+set_env LLM_PROVIDER "api"
 set_env POSTGRES_USER "$db_user"
 set_env POSTGRES_PASSWORD "$db_password"
 set_env POSTGRES_DB "$db_name"
@@ -155,55 +142,14 @@ set_env DATA_DIR "$CODEX_DIR/.data"
 set_env LOG_DIR "$CODEX_DIR/logs"
 set_env STATE_DIR "$CODEX_DIR/.state"
 
-if [[ "$LLM_MODE" == api || "$LLM_MODE" == auto ]]; then
-    api_key="${LLM_API_KEY:-}"
-    if [[ -z "$api_key" ]]; then
-        read -r -s -p "Hosted LLM API key (leave empty for local fallback): " api_key || true
-        printf '\n' >&2
-    fi
-    if [[ -n "$api_key" ]]; then
-        LLM_API_KEY="$api_key"
-        export LLM_API_KEY
-        set_env LLM_API_KEY "$api_key"
-    fi
+api_key="${LLM_API_KEY:-}"
+if [[ -z "$api_key" && -t 0 ]]; then
+    api_key="$(prompt_secret 'Hosted LLM API key (optional for keyless endpoints)')"
 fi
-
-if [[ "$LLM_MODE" == local || ("$LLM_MODE" == auto && -z "${LLM_API_KEY:-}") ]]; then
-    set_env LLM_PROVIDER "$LLM_MODE"
-    llama_dir="${LLAMA_CPP_DIR:-$CODEX_DIR/.local/llama.cpp}"
-    if [[ ! -x "$llama_dir/build/bin/llama-server" ]]; then
-        info "Building llama.cpp"
-        mkdir -p "$(dirname "$llama_dir")"
-        [[ -d "$llama_dir/.git" ]] || git clone --depth 1 https://github.com/ggml-org/llama.cpp.git "$llama_dir"
-        cmake -S "$llama_dir" -B "$llama_dir/build" -DGGML_NATIVE=ON -DGGML_CUDA="$CUDA"
-        cmake --build "$llama_dir/build" --config Release -j"$(nproc)"
-    fi
-    set_env LLAMA_CPP_DIR "$llama_dir"
-    set_env LLAMA_CPP_BIN "$llama_dir/build/bin/llama-server"
-    mkdir -p "$CODEX_DIR/models"
-    for spec in \
-        "QWEN3_8B_MODEL_PATH|Qwen3-8B-Q4_K_M.gguf|${QWEN3_8B_MODEL_URL:-}" \
-        "QWEN3_4B_MODEL_PATH|Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf|${QWEN3_4B_MODEL_URL:-}"; do
-        IFS='|' read -r key filename url <<< "$spec"
-        path="$CODEX_DIR/models/$filename"
-        if [[ ! -f "$path" ]]; then
-            if [[ -z "$url" ]]; then
-                read -r -p "Download URL for $filename (leave empty to abort): " url || true
-            fi
-            [[ -n "$url" ]] || die "Set ${key%_PATH}_URL in .env to download $filename"
-            curl -fL --retry 3 "$url" -o "$path"
-            set_env "${key%_PATH}_URL" "$url"
-        fi
-        set_env "$key" "$path"
-    done
-fi
+set_env LLM_API_KEY "$api_key"
 
 info "Installing Python dependencies"
-if [[ "$CUDA" == true ]]; then
-    CODEX_CUDA=true bash "$SCRIPT_DIR/setup_venv.sh"
-else
-    bash "$SCRIPT_DIR/setup_venv.sh"
-fi
+bash "$SCRIPT_DIR/setup_venv.sh"
 
 info "Installing and configuring Neo4j"
 if ! command -v neo4j >/dev/null 2>&1 && [[ ! -x "${NEO4J_HOME:-}/bin/neo4j" ]]; then
@@ -255,14 +201,11 @@ PY
     sleep 2
 done
 
-if [[ "$LLM_PROVIDER" == api ]]; then
-    [[ -n "${LLM_API_KEY:-}" ]] || die "API mode selected but LLM_API_KEY is empty"
-    curl -fsS -H "Authorization: Bearer $LLM_API_KEY" "${LLM_BASE_URL:-https://api.openai.com/v1}/models" >/dev/null || \
-        die "Hosted LLM API health check failed"
+if [[ -n "${LLM_API_KEY:-}" ]]; then
+    curl -fsS -H "Authorization: Bearer $LLM_API_KEY" \
+        "${LLM_BASE_URL:-https://api.openai.com/v1}/models" >/dev/null || die "Hosted LLM API health check failed"
 else
-    "$LLAMA_CPP_BIN" --version >/dev/null 2>&1 || die "llama-server could not be executed"
-    curl -fsS "${LLAMA_8B_URL:-http://127.0.0.1:8080}/health" >/dev/null 2>&1 || \
-        echo "WARNING: local llama.cpp is installed but not running yet"
+    curl -fsS "${LLM_BASE_URL:-https://api.openai.com/v1}/models" >/dev/null || die "Hosted LLM API health check failed"
 fi
 
 cat <<EOF

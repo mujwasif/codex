@@ -4,6 +4,7 @@ Query endpoints: submit a policy question and view history.
 
 import time
 import uuid
+import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import joinedload
@@ -180,7 +181,7 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
                 confidence=confidence,
                 abstained=abstained,
                 latency_ms=latency_ms,
-                model_version="Qwen3-8B-Q4_K_M.gguf"
+                model_version=os.getenv("LLM_MODEL", "hosted-api")
             )
             session.add(answer_record)
 
