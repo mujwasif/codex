@@ -26,12 +26,11 @@ from typing import List, Optional
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import text
 
-from codex.packages.shared.db import get_db_session, init_db
-from codex.packages.shared.models import Document, Chunk
-from codex.packages.shared.access_control import infer_access_level
-from codex.services.ingestion.structure_chunker import chunk_document_clauses, get_chunk_stats
-from codex.packages.shared.config import (
-
+from packages.shared.db import get_db_session, init_db
+from packages.shared.models import Document, Chunk
+from packages.shared.access_control import infer_access_level
+from services.ingestion.structure_chunker import chunk_document_clauses, get_chunk_stats
+from packages.shared.config import (
     CODEX_API_URL,
     CLAIM_INTERVAL as CONFIG_CLAIM_INTERVAL,
     GRAPH_BATCH_SIZE as CONFIG_GRAPH_BATCH_SIZE,
@@ -88,7 +87,9 @@ def _acquire_singleton_lock() -> bool:
             with open(WORKER_LOCK_PATH, "r") as f:
                 existing = f.read().strip()
             if existing.isdigit() and _pid_is_worker(int(existing)):
-                logger.info(f"Another ingestion worker is already running (pid {existing}); exiting.")
+                logger.info(
+                    f"Another ingestion worker is already running (pid {existing}); exiting."
+                )
                 return False
         except Exception:
             pass
@@ -131,6 +132,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 def _get_neo4j_driver():
     from neo4j import GraphDatabase
+
     return GraphDatabase.driver(
         NEO4J_URI,
         auth=(NEO4J_USER, NEO4J_PASS) if NEO4J_PASS else None,
@@ -176,7 +178,9 @@ def process_document(doc_id: str, model: SentenceTransformer):
             {"id": doc_id},
         ).fetchone()
         if not row:
-            logger.warning(f"Document {doc_id} not found (likely cancelled before processing)")
+            logger.warning(
+                f"Document {doc_id} not found (likely cancelled before processing)"
+            )
             return
         filename = row.title
         file_path = row.source_uri
@@ -209,12 +213,16 @@ def process_document(doc_id: str, model: SentenceTransformer):
         )
 
         stats = get_chunk_stats(chunks)
-        logger.info(f"  Created {stats['total_chunks']} chunks from {stats['unique_sections']} sections")
+        logger.info(
+            f"  Created {stats['total_chunks']} chunks from {stats['unique_sections']} sections"
+        )
 
         with get_db_session() as session:
             doc = session.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise RuntimeError(f"Document {doc_id} not found in DB (cancelled mid-flight)")
+                raise RuntimeError(
+                    f"Document {doc_id} not found in DB (cancelled mid-flight)"
+                )
 
             for chunk_data in chunks:
                 chunk_id = str(uuid.uuid4())
@@ -227,7 +235,9 @@ def process_document(doc_id: str, model: SentenceTransformer):
                     clause_ref=chunk_data["clause_ref"],
                     page=chunk_data.get("page"),
                     text=chunk_data["text"],
-                    embedding=embedding.tolist() if hasattr(embedding, "tolist") else embedding,
+                    embedding=embedding.tolist()
+                    if hasattr(embedding, "tolist")
+                    else embedding,
                     token_count=chunk_data["token_count"],
                     version="v1",
                     access_level=access_level,
@@ -250,7 +260,10 @@ def process_document(doc_id: str, model: SentenceTransformer):
     try:
         from packages.shared.auth import create_access_token
         import requests as http_req
-        admin_token = create_access_token({"username": "admin", "sub": "admin", "access_level": 3})
+
+        admin_token = create_access_token(
+            {"username": "admin", "sub": "admin", "access_level": 3}
+        )
         resp = http_req.post(
             f"{CODEX_API_URL.rstrip('/')}/admin/refresh-index",
             headers={"Authorization": f"Bearer {admin_token}"},
@@ -264,7 +277,10 @@ def process_document(doc_id: str, model: SentenceTransformer):
         logger.warning(f"  BM25 refresh failed (FastAPI may be offline): {e}")
 
     try:
-        from services.ingestion.llm_graph_generator import generate_graph_for_document, execute_graph_in_neo4j
+        from services.ingestion.llm_graph_generator import (
+            generate_graph_for_document,
+            execute_graph_in_neo4j,
+        )
 
         with get_db_session() as session:
             doc = session.query(Document).filter(Document.id == doc_id).first()
@@ -273,7 +289,9 @@ def process_document(doc_id: str, model: SentenceTransformer):
                 session.commit()
 
         db_chunks = _get_chunks_for_document(doc_id)
-        logger.info(f"  Generating graph for {len(db_chunks)} chunks (batch size {GRAPH_BATCH_SIZE})...")
+        logger.info(
+            f"  Generating graph for {len(db_chunks)} chunks (batch size {GRAPH_BATCH_SIZE})..."
+        )
 
         formatted_chunks = [
             {
@@ -302,7 +320,9 @@ def process_document(doc_id: str, model: SentenceTransformer):
             driver = _get_neo4j_driver()
             execute_graph_in_neo4j(graph, driver)
             driver.close()
-            logger.info(f"  Graph complete: {len(graph.get('nodes', []))} nodes, {len(graph.get('edges', []))} edges")
+            logger.info(
+                f"  Graph complete: {len(graph.get('nodes', []))} nodes, {len(graph.get('edges', []))} edges"
+            )
 
         with get_db_session() as session:
             doc = session.query(Document).filter(Document.id == doc_id).first()
@@ -329,7 +349,9 @@ def process_document(doc_id: str, model: SentenceTransformer):
             driver = _get_neo4j_driver()
             with driver.session() as session:
                 with session.begin_transaction() as tx:
-                    tx.run("MATCH (p:Policy {id: $doc_id}) DETACH DELETE p", doc_id=doc_id)
+                    tx.run(
+                        "MATCH (p:Policy {id: $doc_id}) DETACH DELETE p", doc_id=doc_id
+                    )
                     chunk_ids = [str(c["id"]) for c in _get_chunks_for_document(doc_id)]
                     if chunk_ids:
                         tx.run(
@@ -348,7 +370,9 @@ def _claim_pending() -> Optional[str]:
     """Atomically claim the oldest pending document, or None if none exists."""
     with get_db_session() as session:
         row = session.execute(
-            text("SELECT id FROM documents WHERE ingestion_status = 'pending' ORDER BY created_at LIMIT 1")
+            text(
+                "SELECT id FROM documents WHERE ingestion_status = 'pending' ORDER BY created_at LIMIT 1"
+            )
         ).fetchone()
         if not row:
             return None
@@ -372,7 +396,9 @@ def run_worker():
     logger.info("Codex Ingestion Worker starting")
     logger.info("  LLM: hosted API (%s)", LLM_BASE_URL)
     logger.info(f"  Neo4j: {NEO4J_URI}")
-    logger.info("  Mode: explicit queue — processes ONLY documents uploaded through the admin UI")
+    logger.info(
+        "  Mode: explicit queue — processes ONLY documents uploaded through the admin UI"
+    )
     logger.info("=" * 50)
 
     if not _acquire_singleton_lock():

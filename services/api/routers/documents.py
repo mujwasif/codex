@@ -4,16 +4,23 @@ Document browsing endpoints: documents, chunks, and entities.
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from codex.packages.shared.schemas import (
-    DocumentResponse, DocumentListResponse, DocumentDetailResponse,
-    ChunkResponse, ChunkDetailResponse, PaginatedChunksResponse,
-    EntityResponse, SimilarClauseResponse,
-    DocumentConflictsResponse, DocumentConflictGroup, ConflictPair,
+from packages.shared.schemas import (
+    DocumentResponse,
+    DocumentListResponse,
+    DocumentDetailResponse,
+    ChunkResponse,
+    ChunkDetailResponse,
+    PaginatedChunksResponse,
+    EntityResponse,
+    SimilarClauseResponse,
+    DocumentConflictsResponse,
+    DocumentConflictGroup,
+    ConflictPair,
     ConflictClauseInfo,
 )
-from codex.packages.shared.db import get_db_session
-from codex.packages.shared.models import Document, Chunk, Entity
-from codex.services.api.dependencies import get_current_active_user
+from packages.shared.db import get_db_session
+from packages.shared.models import Document, Chunk, Entity
+from services.api.dependencies import get_current_active_user
 
 router = APIRouter(tags=["documents"])
 
@@ -22,29 +29,39 @@ router = APIRouter(tags=["documents"])
 async def list_documents(
     limit: int = 50,
     offset: int = 0,
-    current_user: dict = Depends(get_current_active_user)
+    current_user: dict = Depends(get_current_active_user),
 ):
     """List all ingested documents with chunk/entity counts."""
     try:
         with get_db_session() as session:
-            documents = session.query(Document).order_by(
-                Document.created_at.desc()
-            ).limit(limit).offset(offset).all()
+            documents = (
+                session.query(Document)
+                .order_by(Document.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+                .all()
+            )
 
             result = []
             for doc in documents:
-                chunk_count = session.query(Chunk).filter(Chunk.document_id == doc.id).count()
-                entity_count = session.query(Entity).filter(Entity.document_id == doc.id).count()
+                chunk_count = (
+                    session.query(Chunk).filter(Chunk.document_id == doc.id).count()
+                )
+                entity_count = (
+                    session.query(Entity).filter(Entity.document_id == doc.id).count()
+                )
 
-                result.append(DocumentListResponse(
-                    id=str(doc.id),
-                    title=doc.title,
-                    type=doc.type,
-                    status=doc.status,
-                    chunk_count=chunk_count,
-                    entity_count=entity_count,
-                    created_at=doc.created_at.isoformat() if doc.created_at else ""
-                ))
+                result.append(
+                    DocumentListResponse(
+                        id=str(doc.id),
+                        title=doc.title,
+                        type=doc.type,
+                        status=doc.status,
+                        chunk_count=chunk_count,
+                        entity_count=entity_count,
+                        created_at=doc.created_at.isoformat() if doc.created_at else "",
+                    )
+                )
 
             return result
     except Exception as e:
@@ -54,8 +71,7 @@ async def list_documents(
 
 @router.get("/documents/{document_id}", response_model=DocumentDetailResponse)
 async def get_document_detail(
-    document_id: str,
-    current_user: dict = Depends(get_current_active_user)
+    document_id: str, current_user: dict = Depends(get_current_active_user)
 ):
     """Get document details with its chunks and entities."""
     try:
@@ -64,13 +80,16 @@ async def get_document_detail(
             if not doc:
                 raise HTTPException(status_code=404, detail="Document not found")
 
-            chunks = session.query(Chunk).filter(
-                Chunk.document_id == document_id
-            ).order_by(Chunk.section_path).all()
+            chunks = (
+                session.query(Chunk)
+                .filter(Chunk.document_id == document_id)
+                .order_by(Chunk.section_path)
+                .all()
+            )
 
-            entities = session.query(Entity).filter(
-                Entity.document_id == document_id
-            ).all()
+            entities = (
+                session.query(Entity).filter(Entity.document_id == document_id).all()
+            )
 
             return DocumentDetailResponse(
                 document=DocumentResponse(
@@ -79,12 +98,14 @@ async def get_document_detail(
                     type=doc.type,
                     owner=doc.owner,
                     version=doc.version,
-                    effective_date=doc.effective_date.isoformat() if doc.effective_date else None,
+                    effective_date=doc.effective_date.isoformat()
+                    if doc.effective_date
+                    else None,
                     status=doc.status,
                     source_uri=doc.source_uri,
                     access_tags=doc.access_tags or [],
                     created_at=doc.created_at.isoformat() if doc.created_at else "",
-                    updated_at=doc.updated_at.isoformat() if doc.updated_at else ""
+                    updated_at=doc.updated_at.isoformat() if doc.updated_at else "",
                 ),
                 chunks=[
                     ChunkResponse(
@@ -95,7 +116,7 @@ async def get_document_detail(
                         page=c.page,
                         text=c.text,
                         token_count=c.token_count,
-                        created_at=c.created_at.isoformat() if c.created_at else ""
+                        created_at=c.created_at.isoformat() if c.created_at else "",
                     )
                     for c in chunks
                 ],
@@ -106,10 +127,10 @@ async def get_document_detail(
                         name=e.name,
                         document_id=str(e.document_id),
                         attrs=e.attrs or {},
-                        created_at=e.created_at.isoformat() if e.created_at else ""
+                        created_at=e.created_at.isoformat() if e.created_at else "",
                     )
                     for e in entities
-                ]
+                ],
             )
     except HTTPException:
         raise
@@ -123,7 +144,7 @@ async def list_chunks(
     document_id: str = None,
     limit: int = 50,
     offset: int = 0,
-    current_user: dict = Depends(get_current_active_user)
+    current_user: dict = Depends(get_current_active_user),
 ):
     """Browse/search all chunks with filters."""
     try:
@@ -136,12 +157,14 @@ async def list_chunks(
             if search:
                 search_filter = f"%{search}%"
                 query = query.filter(
-                    (Chunk.clause_ref.ilike(search_filter)) |
-                    (Chunk.text.ilike(search_filter))
+                    (Chunk.clause_ref.ilike(search_filter))
+                    | (Chunk.text.ilike(search_filter))
                 )
 
             total = query.count()
-            chunks = query.order_by(Chunk.section_path).limit(limit).offset(offset).all()
+            chunks = (
+                query.order_by(Chunk.section_path).limit(limit).offset(offset).all()
+            )
 
             return PaginatedChunksResponse(
                 chunks=[
@@ -153,13 +176,13 @@ async def list_chunks(
                         page=c.page,
                         text=c.text[:500] + "..." if len(c.text) > 500 else c.text,
                         token_count=c.token_count,
-                        created_at=c.created_at.isoformat() if c.created_at else ""
+                        created_at=c.created_at.isoformat() if c.created_at else "",
                     )
                     for c in chunks
                 ],
                 total=total,
                 limit=limit,
-                offset=offset
+                offset=offset,
             )
     except Exception as e:
         print(f"⚠️ Failed to fetch chunks: {e}")
@@ -168,8 +191,7 @@ async def list_chunks(
 
 @router.get("/chunks/{chunk_id}", response_model=ChunkDetailResponse)
 async def get_chunk_detail(
-    chunk_id: str,
-    current_user: dict = Depends(get_current_active_user)
+    chunk_id: str, current_user: dict = Depends(get_current_active_user)
 ):
     """Get a specific chunk's full text and metadata."""
     try:
@@ -178,7 +200,9 @@ async def get_chunk_detail(
             if not chunk:
                 raise HTTPException(status_code=404, detail="Chunk not found")
 
-            doc = session.query(Document).filter(Document.id == chunk.document_id).first()
+            doc = (
+                session.query(Document).filter(Document.id == chunk.document_id).first()
+            )
             doc_title = doc.title if doc else None
 
             return ChunkDetailResponse(
@@ -190,9 +214,9 @@ async def get_chunk_detail(
                     page=chunk.page,
                     text=chunk.text,
                     token_count=chunk.token_count,
-                    created_at=chunk.created_at.isoformat() if chunk.created_at else ""
+                    created_at=chunk.created_at.isoformat() if chunk.created_at else "",
                 ),
-                document_title=doc_title
+                document_title=doc_title,
             )
     except HTTPException:
         raise
@@ -215,11 +239,14 @@ async def find_similar_clauses(
             if not chunk:
                 raise HTTPException(status_code=404, detail="Chunk not found")
 
-            source_doc = session.query(Document).filter(Document.id == chunk.document_id).first()
+            source_doc = (
+                session.query(Document).filter(Document.id == chunk.document_id).first()
+            )
             if source_doc and source_doc.access_level > access_level:
                 raise HTTPException(status_code=403, detail="Access denied")
 
         from services.api.search import find_similar_clauses as _find_similar
+
         similar = _find_similar(
             clause_text=chunk.text,
             access_level=access_level,
@@ -232,30 +259,40 @@ async def find_similar_clauses(
         for sim in similar:
             doc_title = ""
             with get_db_session() as session:
-                doc = session.query(Document).filter(Document.id == sim["document_id"]).first()
+                doc = (
+                    session.query(Document)
+                    .filter(Document.id == sim["document_id"])
+                    .first()
+                )
                 doc_title = doc.title if doc else ""
-            results.append(SimilarClauseResponse(
-                chunk=ChunkResponse(
-                    id=sim["id"],
-                    document_id=sim["document_id"],
-                    section_path=sim.get("section_path"),
-                    clause_ref=sim.get("clause_ref"),
-                    page=None,
-                    text=sim["text"],
-                    token_count=None,
-                    created_at="",
-                ),
-                similarity=sim["similarity"],
-                document_title=doc_title,
-            ))
+            results.append(
+                SimilarClauseResponse(
+                    chunk=ChunkResponse(
+                        id=sim["id"],
+                        document_id=sim["document_id"],
+                        section_path=sim.get("section_path"),
+                        clause_ref=sim.get("clause_ref"),
+                        page=None,
+                        text=sim["text"],
+                        token_count=None,
+                        created_at="",
+                    ),
+                    similarity=sim["similarity"],
+                    document_title=doc_title,
+                )
+            )
         return results
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Similar clause search failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Similar clause search failed: {e}"
+        )
 
 
-@router.get("/documents/{document_id}/conflicts", response_model=DocumentConflictsResponse)
+@router.get(
+    "/documents/{document_id}/conflicts", response_model=DocumentConflictsResponse
+)
 async def get_document_conflicts(
     document_id: str,
     similarity_threshold: float = 0.5,
@@ -295,6 +332,7 @@ async def get_document_conflicts(
             ]
 
         from services.agents.conflict_agent import detect_conflicting_documents
+
         result = detect_conflicting_documents(
             target_doc_chunks=target_chunks,
             target_doc_id=document_id,
@@ -311,21 +349,27 @@ async def get_document_conflicts(
             for c in doc_group.get("conflicts", []):
                 ca = c.get("clause_a", {})
                 cb = c.get("clause_b", {})
-                conflicts.append(ConflictPair(
-                    clause_a=ConflictClauseInfo(**ca),
-                    clause_b=ConflictClauseInfo(**cb),
-                    similarity=c.get("similarity", 0.0),
-                    conflict=c.get("conflict", False),
-                    reason=c.get("reason", ""),
-                    source=c.get("source", ""),
-                ))
-            conflicting_docs.append(DocumentConflictGroup(
-                document_id=doc_group["document_id"],
-                document_title=doc_group["document_title"],
-                conflicts=conflicts,
-                unchecked_candidate_count=doc_group.get("unchecked_candidate_count", 0),
-                total_candidate_count=doc_group.get("total_candidate_count", 0),
-            ))
+                conflicts.append(
+                    ConflictPair(
+                        clause_a=ConflictClauseInfo(**ca),
+                        clause_b=ConflictClauseInfo(**cb),
+                        similarity=c.get("similarity", 0.0),
+                        conflict=c.get("conflict", False),
+                        reason=c.get("reason", ""),
+                        source=c.get("source", ""),
+                    )
+                )
+            conflicting_docs.append(
+                DocumentConflictGroup(
+                    document_id=doc_group["document_id"],
+                    document_title=doc_group["document_title"],
+                    conflicts=conflicts,
+                    unchecked_candidate_count=doc_group.get(
+                        "unchecked_candidate_count", 0
+                    ),
+                    total_candidate_count=doc_group.get("total_candidate_count", 0),
+                )
+            )
 
         return DocumentConflictsResponse(
             document_id=document_id,
@@ -339,7 +383,9 @@ async def get_document_conflicts(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Document conflict check failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Document conflict check failed: {e}"
+        )
 
 
 @router.get("/entities", response_model=list[EntityResponse])
@@ -347,7 +393,7 @@ async def list_entities(
     type: str = None,
     document_id: str = None,
     limit: int = 100,
-    current_user: dict = Depends(get_current_active_user)
+    current_user: dict = Depends(get_current_active_user),
 ):
     """Browse extracted entities (thresholds, approvals, deadlines)."""
     try:
@@ -368,7 +414,7 @@ async def list_entities(
                     name=e.name,
                     document_id=str(e.document_id),
                     attrs=e.attrs or {},
-                    created_at=e.created_at.isoformat() if e.created_at else ""
+                    created_at=e.created_at.isoformat() if e.created_at else "",
                 )
                 for e in entities
             ]

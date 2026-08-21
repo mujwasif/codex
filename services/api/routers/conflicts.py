@@ -6,15 +6,15 @@ POST /v1/conflicts/compare  — compare 2-3 documents for conflicts
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from codex.packages.shared.schemas import (
+from packages.shared.schemas import (
     ConflictCompareRequest,
     ConflictCompareResponse,
     ConflictPair,
     ConflictClauseInfo,
 )
-from codex.packages.shared.db import get_db_session
-from codex.packages.shared.models import Document, Chunk
-from codex.services.api.dependencies import get_current_active_user
+from packages.shared.db import get_db_session
+from packages.shared.models import Document, Chunk
+from services.api.dependencies import get_current_active_user
 from services.agents.conflict_agent import compare_document_chunks
 
 router = APIRouter(prefix="/v1/conflicts", tags=["conflicts"])
@@ -27,10 +27,15 @@ def _resolve_document_ids(
 ) -> list[str]:
     """Resolve document IDs or names to validated, accessible IDs."""
     if not doc_ids and not doc_names:
-        raise HTTPException(status_code=400, detail="Provide document_ids or document_names")
+        raise HTTPException(
+            status_code=400, detail="Provide document_ids or document_names"
+        )
 
     if doc_ids and doc_names:
-        raise HTTPException(status_code=400, detail="Provide either document_ids or document_names, not both")
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either document_ids or document_names, not both",
+        )
 
     with get_db_session() as session:
         if doc_ids:
@@ -42,11 +47,17 @@ def _resolve_document_ids(
             found_ids = {str(d.id) for d in docs}
             accessible_ids = {str(d.id) for d in docs if d.access_level <= access_level}
             missing = [did for did in doc_ids if did not in found_ids]
-            restricted = [did for did in doc_ids if did in found_ids and did not in accessible_ids]
+            restricted = [
+                did for did in doc_ids if did in found_ids and did not in accessible_ids
+            ]
             if missing:
-                raise HTTPException(status_code=404, detail=f"Documents not found: {missing}")
+                raise HTTPException(
+                    status_code=404, detail=f"Documents not found: {missing}"
+                )
             if restricted:
-                raise HTTPException(status_code=403, detail=f"Access denied for: {restricted}")
+                raise HTTPException(
+                    status_code=403, detail=f"Access denied for: {restricted}"
+                )
             return list(accessible_ids)
 
         resolved = []
@@ -61,7 +72,9 @@ def _resolve_document_ids(
                 .all()
             )
             if len(matches) == 0:
-                raise HTTPException(status_code=404, detail=f"Document not found: '{name}'")
+                raise HTTPException(
+                    status_code=404, detail=f"Document not found: '{name}'"
+                )
             if len(matches) > 1:
                 candidates = [{"id": str(m.id), "title": m.title} for m in matches]
                 raise HTTPException(
@@ -85,12 +98,18 @@ async def compare_documents(
     """
     try:
         access_level = current_user.get("access_level", 1)
-        doc_ids = _resolve_document_ids(req.document_ids, req.document_names, access_level)
+        doc_ids = _resolve_document_ids(
+            req.document_ids, req.document_names, access_level
+        )
 
         if len(doc_ids) < 2:
-            raise HTTPException(status_code=400, detail="At least 2 accessible documents required")
+            raise HTTPException(
+                status_code=400, detail="At least 2 accessible documents required"
+            )
         if len(doc_ids) > 3:
-            raise HTTPException(status_code=400, detail="Maximum 3 documents for comparison")
+            raise HTTPException(
+                status_code=400, detail="Maximum 3 documents for comparison"
+            )
 
         with get_db_session() as session:
             doc_titles = {}
@@ -107,15 +126,17 @@ async def compare_documents(
             )
             for c in chunks:
                 cid = str(c.document_id)
-                chunks_by_doc.setdefault(cid, []).append({
-                    "id": str(c.id),
-                    "text": c.text,
-                    "document_id": cid,
-                    "clause_ref": c.clause_ref,
-                    "section_path": c.section_path,
-                    "title": doc_titles.get(cid, ""),
-                    "similarity": 0.0,
-                })
+                chunks_by_doc.setdefault(cid, []).append(
+                    {
+                        "id": str(c.id),
+                        "text": c.text,
+                        "document_id": cid,
+                        "clause_ref": c.clause_ref,
+                        "section_path": c.section_path,
+                        "title": doc_titles.get(cid, ""),
+                        "similarity": 0.0,
+                    }
+                )
 
         result = compare_document_chunks(
             chunks_by_doc=chunks_by_doc,

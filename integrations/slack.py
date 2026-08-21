@@ -54,7 +54,9 @@ class SlackIntegration(ChatIntegration):
         users_map_path: Optional[str] = None,
         user_store: Optional[dict] = None,
     ):
-        self.signing_secret = signing_secret if signing_secret is not None else DEFAULT_SIGNING_SECRET
+        self.signing_secret = (
+            signing_secret if signing_secret is not None else DEFAULT_SIGNING_SECRET
+        )
         self.bot_token = bot_token if bot_token is not None else DEFAULT_BOT_TOKEN
         self.api_url = (api_url or DEFAULT_API_URL).rstrip("/")
         self.users_map_path = users_map_path or DEFAULT_USERS_MAP_PATH
@@ -62,7 +64,9 @@ class SlackIntegration(ChatIntegration):
         # Defaults to the shared MOCK_USERS store at call time.
         self.user_store = user_store
 
-        self._verifier = SignatureVerifier(self.signing_secret) if self.signing_secret else None
+        self._verifier = (
+            SignatureVerifier(self.signing_secret) if self.signing_secret else None
+        )
         self._client = WebClient(token=self.bot_token) if self.bot_token else None
         self._user_map = self._load_user_map()
         # codex_username -> jwt token
@@ -76,7 +80,9 @@ class SlackIntegration(ChatIntegration):
         try:
             with open(self.users_map_path) as f:
                 data = json.load(f)
-                return {str(k).strip(): str(v).strip() for k, v in data.items() if k and v}
+                return {
+                    str(k).strip(): str(v).strip() for k, v in data.items() if k and v
+                }
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"⚠️ Slack user map load failed ({self.users_map_path}): {e}")
             return {}
@@ -151,9 +157,15 @@ class SlackIntegration(ChatIntegration):
             self._answer(user, channel, question, thread_ts)
         except Exception as e:
             print(f"⚠️ Slack processing error for {user}: {e}")
-            self._safe_post(channel, thread_ts, self._error_blocks("Sorry, I hit an internal error."))
+            self._safe_post(
+                channel,
+                thread_ts,
+                self._error_blocks("Sorry, I hit an internal error."),
+            )
 
-    def _answer(self, slack_user_id: str, channel: str, question: str, thread_ts: Optional[str]):
+    def _answer(
+        self, slack_user_id: str, channel: str, question: str, thread_ts: Optional[str]
+    ):
         """Resolve user, mint token, query Codex, post reply."""
         username = self.resolve_codex_username(slack_user_id)
         token = self._get_token(username)
@@ -161,7 +173,11 @@ class SlackIntegration(ChatIntegration):
         # Server handles conversational context from persisted history
         result = self._ask_codex(question, token)
         if result is None:
-            self._safe_post(channel, thread_ts, self._error_blocks("The policy engine is unreachable right now."))
+            self._safe_post(
+                channel,
+                thread_ts,
+                self._error_blocks("The policy engine is unreachable right now."),
+            )
             return
 
         blocks = self._format_answer(result)
@@ -174,8 +190,9 @@ class SlackIntegration(ChatIntegration):
         if self.user_store is not None:
             return self.user_store.get(username)
         try:
-            from codex.packages.shared.db import get_db_session
-            from codex.packages.shared.models import User
+            from packages.shared.db import get_db_session
+            from packages.shared.models import User
+
             with get_db_session() as session:
                 user = session.query(User).filter(User.username == username).first()
                 if not user:
@@ -310,7 +327,10 @@ class SlackIntegration(ChatIntegration):
                     citation_blocks.append(
                         {
                             "type": "section",
-                            "text": {"type": "mrkdwn", "text": current_block_text.rstrip("\n")},
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": current_block_text.rstrip("\n"),
+                            },
                         }
                     )
                     current_block_text = item_text + "\n"
@@ -321,7 +341,10 @@ class SlackIntegration(ChatIntegration):
                 citation_blocks.append(
                     {
                         "type": "section",
-                        "text": {"type": "mrkdwn", "text": current_block_text.rstrip("\n")},
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": current_block_text.rstrip("\n"),
+                        },
                     }
                 )
 

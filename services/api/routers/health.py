@@ -5,12 +5,10 @@ Health and feedback endpoints.
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 
-from codex.packages.shared.schemas import (
-    HealthResponse, FeedbackCreate, FeedbackResponse
-)
-from codex.packages.shared.db import get_db_session
-from codex.packages.shared.models import Answer, Feedback, Query
-from codex.services.api.dependencies import get_current_active_user, log_audit_action
+from packages.shared.schemas import HealthResponse, FeedbackCreate, FeedbackResponse
+from packages.shared.db import get_db_session
+from packages.shared.models import Answer, Feedback, Query
+from services.api.dependencies import get_current_active_user, log_audit_action
 
 router = APIRouter(tags=["health"])
 
@@ -31,12 +29,14 @@ async def health_check():
 
     try:
         from packages.shared.llm_client import health_check
+
         reasoner_status = "healthy" if health_check() else "unhealthy"
     except Exception:
         reasoner_status = "unavailable"
 
     try:
         from packages.shared.config import LLM_BASE_URL
+
         ingestion_llm_status = "configured" if LLM_BASE_URL else "unconfigured"
     except Exception:
         ingestion_llm_status = "unavailable"
@@ -50,7 +50,9 @@ async def health_check():
 
 
 @router.post("/feedback", response_model=FeedbackResponse)
-async def submit_feedback(feedback_data: FeedbackCreate, current_user: dict = Depends(get_current_active_user)):
+async def submit_feedback(
+    feedback_data: FeedbackCreate, current_user: dict = Depends(get_current_active_user)
+):
     """Submit feedback for an answer."""
     username = current_user.get("username")
 
@@ -84,17 +86,20 @@ async def submit_feedback(feedback_data: FeedbackCreate, current_user: dict = De
                 feedback.rating = feedback_data.rating
             session.commit()
 
-            log_audit_action(username, "feedback", {
-                "answer_id": feedback_data.answer_id,
-                "rating": feedback_data.rating
-            })
+            log_audit_action(
+                username,
+                "feedback",
+                {"answer_id": feedback_data.answer_id, "rating": feedback_data.rating},
+            )
 
             return FeedbackResponse(
                 id=str(feedback.id),
                 answer_id=str(feedback.answer_id),
                 rating=feedback.rating,
                 reviewer=feedback.reviewer,
-                created_at=feedback.created_at.isoformat() if feedback.created_at else ""
+                created_at=feedback.created_at.isoformat()
+                if feedback.created_at
+                else "",
             )
     except HTTPException:
         raise
@@ -103,7 +108,9 @@ async def submit_feedback(feedback_data: FeedbackCreate, current_user: dict = De
 
 
 @router.get("/feedback/{answer_id}", response_model=list[FeedbackResponse])
-async def get_feedback_for_answer(answer_id: str, current_user: dict = Depends(get_current_active_user)):
+async def get_feedback_for_answer(
+    answer_id: str, current_user: dict = Depends(get_current_active_user)
+):
     """Get feedback for a specific answer."""
     try:
         with get_db_session() as session:
@@ -111,7 +118,10 @@ async def get_feedback_for_answer(answer_id: str, current_user: dict = Depends(g
                 session.query(Feedback)
                 .join(Answer, Feedback.answer_id == Answer.id)
                 .join(Query, Answer.query_id == Query.id)
-                .filter(Feedback.answer_id == answer_id, Query.user_id == current_user.get("username"))
+                .filter(
+                    Feedback.answer_id == answer_id,
+                    Query.user_id == current_user.get("username"),
+                )
                 .all()
             )
 
@@ -121,7 +131,7 @@ async def get_feedback_for_answer(answer_id: str, current_user: dict = Depends(g
                     answer_id=str(f.answer_id),
                     rating=f.rating,
                     reviewer=f.reviewer,
-                    created_at=f.created_at.isoformat() if f.created_at else ""
+                    created_at=f.created_at.isoformat() if f.created_at else "",
                 )
                 for f in feedbacks
             ]

@@ -2,11 +2,17 @@ from typing import List, Dict
 from sentence_transformers import CrossEncoder, SentenceTransformer
 from sqlalchemy import text, func
 from packages.shared.db import get_db_session
-from codex.packages.shared.models import Document, Chunk, Citation, Feedback, Answer, Query
+from packages.shared.models import Document, Chunk, Citation, Feedback, Answer, Query
 from packages.shared.chunk_filter import is_low_info
 
 # Configuration
-from packages.shared.config import RETRIEVER_DEVICE, RETRIEVER_MODEL, RERANKER_DEVICE, RERANKER_MODEL
+from packages.shared.config import (
+    RETRIEVER_DEVICE,
+    RETRIEVER_MODEL,
+    RERANKER_DEVICE,
+    RERANKER_MODEL,
+)
+
 FEEDBACK_MIN_RATINGS = 3
 FEEDBACK_PRIOR_WEIGHT = 3.0
 FEEDBACK_MAX_BOOST = 0.10
@@ -18,7 +24,9 @@ reranker = CrossEncoder(RERANKER_MODEL, device=RERANKER_DEVICE)
 
 def _smoothed_feedback_rating(average: float, count: int) -> float:
     """Return a globally smoothed 1-5 quality score."""
-    return ((count * average) + (FEEDBACK_PRIOR_WEIGHT * 3.0)) / (count + FEEDBACK_PRIOR_WEIGHT)
+    return ((count * average) + (FEEDBACK_PRIOR_WEIGHT * 3.0)) / (
+        count + FEEDBACK_PRIOR_WEIGHT
+    )
 
 
 def feedback_quality_boost(average: float, count: int) -> float:
@@ -26,7 +34,10 @@ def feedback_quality_boost(average: float, count: int) -> float:
     if count < FEEDBACK_MIN_RATINGS:
         return 0.0
     adjusted = _smoothed_feedback_rating(average, count)
-    return max(-FEEDBACK_MAX_BOOST, min(FEEDBACK_MAX_BOOST, (adjusted - 3.0) / 2.0 * FEEDBACK_MAX_BOOST))
+    return max(
+        -FEEDBACK_MAX_BOOST,
+        min(FEEDBACK_MAX_BOOST, (adjusted - 3.0) / 2.0 * FEEDBACK_MAX_BOOST),
+    )
 
 
 def get_global_chunk_feedback(chunk_ids: List[str]) -> Dict[str, Dict[str, float]]:
@@ -98,14 +109,14 @@ def get_global_feedback_guidance(intent: str) -> str:
 def reciprocal_rank_fusion(result_lists: List[List[Dict]], k: int = 60) -> List[Dict]:
     """
     Merge multiple ranked lists using Reciprocal Rank Fusion (RRF).
-    
+
     score(d) = sum(1 / (k + rank_i(d))) for each list i
     k=60 is standard (from original RRF paper, Cormack et al. 2009).
-    
+
     Args:
         result_lists: List of ranked result lists. Each list contains dicts with 'id' key.
         k: RRF parameter (default 60)
-        
+
     Returns:
         Merged list sorted by RRF score, deduplicated by chunk id
     """
@@ -157,27 +168,34 @@ def vector_search(query: str, access_level: int, top_k: int = 20) -> List[Dict]:
               AND d.access_level <= :user_level
             ORDER BY c.embedding <=> CAST(:embedding AS vector)
             LIMIT :limit
-        """) 
+        """)
 
-        result = session.execute(sql, {
-            "embedding": str(query_vector),
-            "user_level": access_level,
-            "limit": overfetch
-        })
+        result = session.execute(
+            sql,
+            {
+                "embedding": str(query_vector),
+                "user_level": access_level,
+                "limit": overfetch,
+            },
+        )
 
         candidates = []
         for row in result:
-            candidates.append({
-                "id": str(row.id),
-                "text": row.text,
-                "document_id": str(row.document_id),
-                "clause_ref": row.clause_ref,
-                "section_path": row.section_path,
-                "title": row.title,
-                "similarity": float(row.similarity),
-            })
+            candidates.append(
+                {
+                    "id": str(row.id),
+                    "text": row.text,
+                    "document_id": str(row.document_id),
+                    "clause_ref": row.clause_ref,
+                    "section_path": row.section_path,
+                    "title": row.title,
+                    "similarity": float(row.similarity),
+                }
+            )
 
-    candidates = [c for c in candidates if not is_low_info(c.get("clause_ref"), c.get("text"))]
+    candidates = [
+        c for c in candidates if not is_low_info(c.get("clause_ref"), c.get("text"))
+    ]
     return candidates[:top_k]
 
 
@@ -222,11 +240,14 @@ def find_similar_clauses(
             LIMIT :limit
         """)
 
-        result = session.execute(sql, {
-            "embedding": str(query_vector),
-            "user_level": access_level,
-            "limit": overfetch,
-        })
+        result = session.execute(
+            sql,
+            {
+                "embedding": str(query_vector),
+                "user_level": access_level,
+                "limit": overfetch,
+            },
+        )
 
         candidates = []
         for row in result:
@@ -236,17 +257,21 @@ def find_similar_clauses(
             sim = float(row.similarity)
             if sim < threshold:
                 continue
-            candidates.append({
-                "id": str(row.id),
-                "text": row.text,
-                "document_id": doc_id,
-                "clause_ref": row.clause_ref,
-                "section_path": row.section_path,
-                "title": row.title,
-                "similarity": sim,
-            })
+            candidates.append(
+                {
+                    "id": str(row.id),
+                    "text": row.text,
+                    "document_id": doc_id,
+                    "clause_ref": row.clause_ref,
+                    "section_path": row.section_path,
+                    "title": row.title,
+                    "similarity": sim,
+                }
+            )
 
-    candidates = [c for c in candidates if not is_low_info(c.get("clause_ref"), c.get("text"))]
+    candidates = [
+        c for c in candidates if not is_low_info(c.get("clause_ref"), c.get("text"))
+    ]
     return candidates[:top_k]
 
 
@@ -283,15 +308,17 @@ def fetch_chunks_by_document(
     result: Dict[str, List[Dict]] = {}
     for c in chunks:
         doc_id = str(c.document_id)
-        result.setdefault(doc_id, []).append({
-            "id": str(c.id),
-            "text": c.text,
-            "document_id": doc_id,
-            "clause_ref": c.clause_ref,
-            "section_path": c.section_path,
-            "title": "",
-            "similarity": 0.0,
-        })
+        result.setdefault(doc_id, []).append(
+            {
+                "id": str(c.id),
+                "text": c.text,
+                "document_id": doc_id,
+                "clause_ref": c.clause_ref,
+                "section_path": c.section_path,
+                "title": "",
+                "similarity": 0.0,
+            }
+        )
 
     titles = {}
     docs = session.query(Document).filter(Document.id.in_(doc_ids)).all()
@@ -352,11 +379,13 @@ def build_cross_doc_candidates(
             if pair_key in seen_pairs:
                 continue
             seen_pairs.add(pair_key)
-            all_candidates.append({
-                "source_chunk": src,
-                "candidate_chunk": sim_chunk,
-                "similarity": sim_chunk.get("similarity", 0.0),
-            })
+            all_candidates.append(
+                {
+                    "source_chunk": src,
+                    "candidate_chunk": sim_chunk,
+                    "similarity": sim_chunk.get("similarity", 0.0),
+                }
+            )
 
     all_candidates.sort(key=lambda x: x["similarity"], reverse=True)
     return all_candidates[:max_pairs]
@@ -372,7 +401,7 @@ def search_policy(
 ) -> List[Dict]:
     """
     Search for relevant policy chunks with configurable search mode.
-    
+
     Args:
         query: The user's question
         access_level: User's access level (1=Standard, 2=Manager, 3=Admin)
@@ -380,7 +409,7 @@ def search_policy(
         top_k_final: Number of final results to return after reranking
         search_mode: "vector" | "hybrid" | "bm25"
         bm25_index: BM25Index instance (required for hybrid/bm25 modes)
-        
+
     Returns:
         List of chunk dictionaries with text, title, clause_ref, score, etc.
     """
@@ -395,7 +424,11 @@ def search_policy(
 
         elif search_mode == "hybrid":
             vector_results = vector_search(query, access_level, top_k_retrieval)
-            bm25_results = bm25_index.search(query, top_k_retrieval, access_level) if bm25_index else []
+            bm25_results = (
+                bm25_index.search(query, top_k_retrieval, access_level)
+                if bm25_index
+                else []
+            )
             candidates = reciprocal_rank_fusion([vector_results, bm25_results], k=60)
 
         else:
@@ -416,9 +449,9 @@ def search_policy(
         for i, score in enumerate(scores):
             candidates[i]["score"] = float(score)
 
-        feedback_scores = get_global_chunk_feedback([
-            str(c.get("id", "")) for c in candidates if c.get("id")
-        ])
+        feedback_scores = get_global_chunk_feedback(
+            [str(c.get("id", "")) for c in candidates if c.get("id")]
+        )
         for candidate in candidates:
             stats = feedback_scores.get(str(candidate.get("id", "")))
             if stats:

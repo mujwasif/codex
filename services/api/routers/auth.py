@@ -5,11 +5,11 @@ Authentication endpoints: register and login.
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 
-from codex.packages.shared.auth import get_pwd_hash, verify_password, create_access_token
-from codex.packages.shared.schemas import Token, UserCreate, UserResponse
-from codex.packages.shared.db import get_db_session
-from codex.packages.shared.models import User
-from codex.services.api.dependencies import log_audit_action
+from packages.shared.auth import get_pwd_hash, verify_password, create_access_token
+from packages.shared.schemas import Token, UserCreate, UserResponse
+from packages.shared.db import get_db_session
+from packages.shared.models import User
+from services.api.dependencies import log_audit_action
 
 router = APIRouter(tags=["auth"])
 
@@ -18,7 +18,9 @@ router = APIRouter(tags=["auth"])
 async def register(user: UserCreate):
     try:
         with get_db_session() as session:
-            existing = session.query(User).filter(User.username == user.username).first()
+            existing = (
+                session.query(User).filter(User.username == user.username).first()
+            )
             if existing:
                 raise HTTPException(status_code=400, detail="Username already exists")
 
@@ -33,10 +35,11 @@ async def register(user: UserCreate):
             session.commit()
             session.refresh(new_user)
 
-            log_audit_action(user.username, "register", {
-                "department": user.department,
-                "access_level": user.access_level
-            })
+            log_audit_action(
+                user.username,
+                "register",
+                {"department": user.department, "access_level": user.access_level},
+            )
 
             return UserResponse(
                 username=new_user.username,
@@ -54,9 +57,13 @@ async def register(user: UserCreate):
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     try:
         with get_db_session() as session:
-            user = session.query(User).filter(User.username == form_data.username).first()
+            user = (
+                session.query(User).filter(User.username == form_data.username).first()
+            )
             if not user or not verify_password(form_data.password, user.password_hash):
-                raise HTTPException(status_code=400, detail="Incorrect username or password")
+                raise HTTPException(
+                    status_code=400, detail="Incorrect username or password"
+                )
 
             if not user.is_active:
                 raise HTTPException(status_code=403, detail="Inactive user")

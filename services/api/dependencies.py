@@ -8,9 +8,9 @@ endpoint routers stay thin.
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
-from codex.packages.shared.auth import verify_token
-from codex.packages.shared.db import get_db_session
-from codex.packages.shared.models import AuditLog, User
+from packages.shared.auth import verify_token
+from packages.shared.db import get_db_session
+from packages.shared.models import AuditLog, User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
@@ -37,11 +37,7 @@ def log_audit_action(actor: str, action: str, payload: dict = None):
     """Log an action to the audit trail."""
     try:
         with get_db_session() as session:
-            audit_entry = AuditLog(
-                actor=actor,
-                action=action,
-                payload=payload or {}
-            )
+            audit_entry = AuditLog(actor=actor, action=action, payload=payload or {})
             session.add(audit_entry)
             session.commit()
     except Exception as e:
@@ -64,8 +60,7 @@ def get_current_active_user(current_user: dict = Depends(get_current_user)):
     user = get_user_from_db(username)
     if not user or not user.get("is_active", False):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive or deleted user"
+            status_code=status.HTTP_403_FORBIDDEN, detail="Inactive or deleted user"
         )
     return current_user
 

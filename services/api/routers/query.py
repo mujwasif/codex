@@ -9,17 +9,20 @@ import os
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import joinedload
 
-from codex.packages.shared.schemas import (
-    QueryCreate, QueryResponse, AnswerResponse, CitationResponse, ConflictAnalysisResponse
+from packages.shared.schemas import (
+    QueryCreate,
+    QueryResponse,
+    AnswerResponse,
+    CitationResponse,
+    ConflictAnalysisResponse,
 )
-from codex.packages.shared.db import get_db_session
-from codex.packages.shared.models import Query, Answer, Citation, Chunk, Document, User
-from codex.services.api.dependencies import (
-    get_current_active_user, log_audit_action
-)
-from codex.packages.shared.config import HISTORY_MAX_TOKENS, HISTORY_TURNS
+from packages.shared.db import get_db_session
+from packages.shared.models import Query, Answer, Citation, Chunk, Document, User
+from services.api.dependencies import get_current_active_user, log_audit_action
+from packages.shared.config import HISTORY_MAX_TOKENS, HISTORY_TURNS
 
 router = APIRouter(tags=["query"])
+
 
 def _load_user_history(session, user_id_or_name: str, limit: int = HISTORY_TURNS):
     """
@@ -28,7 +31,9 @@ def _load_user_history(session, user_id_or_name: str, limit: int = HISTORY_TURNS
     """
     # Resolve username to UUID if necessary
     user_uuid = user_id_or_name
-    if len(user_id_or_name) < 32:  # Simple heuristic: if it's not a UUID, it's a username
+    if (
+        len(user_id_or_name) < 32
+    ):  # Simple heuristic: if it's not a UUID, it's a username
         user = session.query(User).filter(User.username == user_id_or_name).first()
         if user:
             user_uuid = str(user.id)
@@ -46,11 +51,13 @@ def _load_user_history(session, user_id_or_name: str, limit: int = HISTORY_TURNS
     for q in reversed(q_rows):  # oldest first
         if q.answers:
             a = q.answers[0]  # one answer per query
-            turns.append({
-                "question": q.question,
-                "answer": a.answer,
-                "intent": q.intent,
-            })
+            turns.append(
+                {
+                    "question": q.question,
+                    "answer": a.answer,
+                    "intent": q.intent,
+                }
+            )
     return turns
 
 
@@ -97,7 +104,9 @@ def _build_pipeline_question(
 
 
 @router.post("/query", response_model=AnswerResponse)
-async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get_current_active_user)):
+async def secure_query(
+    query_data: QueryCreate, current_user: dict = Depends(get_current_active_user)
+):
     """
     Process a policy query through the state machine orchestrator.
     Routes to specialized agents based on intent classification.
@@ -131,7 +140,7 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
                 role=f"level_{level}",
                 dept=department,
                 question=query_data.question,
-                intent=query_data.intent
+                intent=query_data.intent,
             )
             session.add(query_record)
             session.commit()
@@ -188,7 +197,7 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
                 confidence=confidence,
                 abstained=abstained,
                 latency_ms=latency_ms,
-                model_version=os.getenv("LLM_MODEL", "hosted-api")
+                model_version=os.getenv("LLM_MODEL", "hosted-api"),
             )
             session.add(answer_record)
 
@@ -198,7 +207,7 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
                     chunk_id=uuid.UUID(chunk.get("id", str(uuid.uuid4()))),
                     document_id=uuid.UUID(chunk.get("document_id", str(uuid.uuid4()))),
                     clause_ref=chunk.get("clause_ref"),
-                    score=chunk.get("score", 0.0)
+                    score=chunk.get("score", 0.0),
                 )
                 session.add(citation)
 
@@ -207,12 +216,16 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
         print(f"⚠️ Answer logging failed: {e}")
 
     # 6. Log audit action
-    log_audit_action(username, "query", {
-        "question": query_data.question[:100],
-        "verdict": verdict,
-        "confidence": confidence,
-        "intent": ctx.intent.value,
-    })
+    log_audit_action(
+        username,
+        "query",
+        {
+            "question": query_data.question[:100],
+            "verdict": verdict,
+            "confidence": confidence,
+            "intent": ctx.intent.value,
+        },
+    )
 
     # 7. Build response
     citations_response = [
@@ -224,7 +237,7 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
             clause_ref=chunk.get("clause_ref"),
             score=chunk.get("score", 0.0),
             section_path=chunk.get("section_path"),
-            quote=chunk.get("text")
+            quote=chunk.get("text"),
         )
         for chunk in chunks
     ]
@@ -242,11 +255,15 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
         reasoning=ctx.build_reasoning(),
         conflict_analysis=(
             ConflictAnalysisResponse(
-                status="inconclusive" if ctx.conflict_analysis.get("inconclusive") else "complete",
+                status="inconclusive"
+                if ctx.conflict_analysis.get("inconclusive")
+                else "complete",
                 conflicts=ctx.conflict_analysis.get("conflicts", []),
                 total_candidates=ctx.conflict_analysis.get("total_candidates", 0),
                 checked_candidates=ctx.conflict_analysis.get("checked_candidates", 0),
-                unchecked_candidates=ctx.conflict_analysis.get("unchecked_candidates", 0),
+                unchecked_candidates=ctx.conflict_analysis.get(
+                    "unchecked_candidates", 0
+                ),
                 llm_calls=ctx.conflict_analysis.get("llm_calls", 0),
                 truncated=ctx.conflict_analysis.get("truncated", False),
                 inconclusive=ctx.conflict_analysis.get("inconclusive", False),
@@ -256,7 +273,7 @@ async def secure_query(query_data: QueryCreate, current_user: dict = Depends(get
         ),
         next_steps=ctx.build_next_steps(),
         missing=ctx.build_missing(),
-        created_at=time.strftime("%Y-%m-%dT%H:%M:%S")
+        created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
     )
 
 
@@ -278,8 +295,10 @@ async def get_query_history(
                 session.query(Query)
                 .filter(Query.user_id == user_uuid)
                 .options(
-                    joinedload(Query.answers).joinedload(Answer.citations)
-                    .joinedload(Citation.chunk).joinedload(Chunk.document)
+                    joinedload(Query.answers)
+                    .joinedload(Answer.citations)
+                    .joinedload(Citation.chunk)
+                    .joinedload(Chunk.document)
                 )
                 .order_by(Query.created_at.desc())
                 .limit(limit)
@@ -301,7 +320,9 @@ async def get_query_history(
                             id=str(c.id),
                             chunk_id=str(c.chunk_id) if c.chunk_id else "",
                             document_id=str(c.document_id) if c.document_id else "",
-                            title=c.chunk.document.title if c.chunk and c.chunk.document else None,
+                            title=c.chunk.document.title
+                            if c.chunk and c.chunk.document
+                            else None,
                             clause_ref=c.clause_ref,
                             score=c.score,
                             section_path=c.chunk.section_path if c.chunk else None,
@@ -323,7 +344,12 @@ async def clear_query_history(current_user: dict = Depends(get_current_active_us
     from sqlalchemy import text as sa_text
 
     username = current_user.get("username")
-    summary = {"queries_deleted": 0, "answers_deleted": 0, "citations_deleted": 0, "feedback_deleted": 0}
+    summary = {
+        "queries_deleted": 0,
+        "answers_deleted": 0,
+        "citations_deleted": 0,
+        "feedback_deleted": 0,
+    }
 
     try:
         with get_db_session() as session:
@@ -368,7 +394,9 @@ async def clear_query_history(current_user: dict = Depends(get_current_active_us
         print(f"⚠️ Failed to clear query history: {e}")
         with get_db_session() as session:
             session.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to clear query history: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to clear query history: {e}"
+        )
 
     log_audit_action(username, "clear_history", summary)
     return summary

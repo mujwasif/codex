@@ -9,8 +9,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import json
 
-from codex.services.ingestion.bm25_index import BM25Index
-from codex.services.api.routers import include_routers
+from services.ingestion.bm25_index import BM25Index
+from services.api.routers import include_routers
 from services.api import state
 from packages.shared.config import CORS_ORIGINS
 
@@ -28,6 +28,7 @@ app.add_middleware(
 async def startup_event():
     # Initialize connection pool for tool calling
     from services.agents.tools.connections import ConnectionPool
+
     ConnectionPool.initialize()
 
     # Load global BM25 index (shared with the admin router and orchestrator)
@@ -45,6 +46,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     from services.agents.tools.connections import ConnectionPool
+
     ConnectionPool.close()
 
 

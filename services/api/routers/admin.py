@@ -9,11 +9,15 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 
-from codex.packages.shared.schemas import AuditLogResponse, DepartmentResponse
-from codex.packages.shared.db import get_db_session
-from codex.packages.shared.models import AuditLog, Answer, Document, Query
-from codex.services.api.dependencies import get_current_active_user, log_audit_action, require_admin
-from codex.services.agents.tools.connections import ConnectionPool
+from packages.shared.schemas import AuditLogResponse, DepartmentResponse
+from packages.shared.db import get_db_session
+from packages.shared.models import AuditLog, Answer, Document, Query
+from services.api.dependencies import (
+    get_current_active_user,
+    log_audit_action,
+    require_admin,
+)
+from services.agents.tools.connections import ConnectionPool
 
 router = APIRouter(tags=["admin"])
 
@@ -43,7 +47,7 @@ async def get_audit_logs(
                     actor=log.actor,
                     action=log.action,
                     payload=log.payload,
-                    ts=log.ts.isoformat() if log.ts else ""
+                    ts=log.ts.isoformat() if log.ts else "",
                 )
                 for log in logs
             ]
@@ -53,9 +57,7 @@ async def get_audit_logs(
 
 
 @router.get("/departments", response_model=list[DepartmentResponse])
-async def list_departments(
-    current_user: dict = Depends(get_current_active_user)
-):
+async def list_departments(current_user: dict = Depends(get_current_active_user)):
     """Return each Department node from the Neo4j knowledge graph with its access level."""
     try:
         driver = ConnectionPool.get_neo4j()
@@ -66,7 +68,9 @@ async def list_departments(
         return [
             DepartmentResponse(
                 name=r["name"],
-                access_level=int(r["access_level"]) if r["access_level"] is not None else None,
+                access_level=int(r["access_level"])
+                if r["access_level"] is not None
+                else None,
             )
             for r in records
         ]
@@ -100,7 +104,9 @@ async def ingest_document(
     from sqlalchemy import text as sa_text
 
     if not file.filename.lower().endswith((".docx", ".pdf")):
-        raise HTTPException(status_code=400, detail="Only .docx and .pdf files are supported")
+        raise HTTPException(
+            status_code=400, detail="Only .docx and .pdf files are supported"
+        )
 
     filename = file.filename
 
@@ -124,16 +130,27 @@ async def ingest_document(
             # the worker's source_uri check no longer matches this path.
             failed_id = str(row.id)
             try:
-                session.execute(sa_text(
-                    "DELETE FROM citations WHERE document_id = :id "
-                    "OR chunk_id IN (SELECT id FROM chunks WHERE document_id = :id)"
-                ), {"id": failed_id})
-                session.execute(sa_text("DELETE FROM entities WHERE document_id = :id"), {"id": failed_id})
-                session.execute(sa_text("DELETE FROM documents WHERE id = :id"), {"id": failed_id})
+                session.execute(
+                    sa_text(
+                        "DELETE FROM citations WHERE document_id = :id "
+                        "OR chunk_id IN (SELECT id FROM chunks WHERE document_id = :id)"
+                    ),
+                    {"id": failed_id},
+                )
+                session.execute(
+                    sa_text("DELETE FROM entities WHERE document_id = :id"),
+                    {"id": failed_id},
+                )
+                session.execute(
+                    sa_text("DELETE FROM documents WHERE id = :id"), {"id": failed_id}
+                )
                 session.commit()
             except Exception as e:
                 session.rollback()
-                raise HTTPException(status_code=500, detail=f"Failed to clear stale failed document: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to clear stale failed document: {e}",
+                )
             log_audit_action(
                 "admin",
                 "ingestion_reupload",
@@ -141,6 +158,7 @@ async def ingest_document(
             )
 
     from packages.shared.config import ARCHIVE_DIR
+
     archive_dir = ARCHIVE_DIR
     os.makedirs(archive_dir, exist_ok=True)
 
@@ -197,27 +215,40 @@ async def get_metrics(
     }
     try:
         from datetime import datetime, timedelta
+
         cutoff = datetime.utcnow() - timedelta(hours=24)
 
         with get_db_session() as session:
             metrics["queries_total"] = session.query(Query).count()
-            metrics["recent_queries_24h"] = session.query(Query).filter(
-                Query.created_at >= cutoff
-            ).count()
+            metrics["recent_queries_24h"] = (
+                session.query(Query).filter(Query.created_at >= cutoff).count()
+            )
 
             answer_rows = session.query(Answer).all()
             metrics["answers_total"] = len(answer_rows)
 
             if answer_rows:
-                latencies = [a.latency_ms for a in answer_rows if a.latency_ms is not None]
-                confidences = [a.confidence for a in answer_rows if a.confidence is not None]
+                latencies = [
+                    a.latency_ms for a in answer_rows if a.latency_ms is not None
+                ]
+                confidences = [
+                    a.confidence for a in answer_rows if a.confidence is not None
+                ]
                 verdicts = [a.verdict for a in answer_rows if a.verdict]
 
-                metrics["avg_latency_ms"] = round(sum(latencies) / len(latencies), 1) if latencies else None
-                metrics["avg_confidence"] = round(sum(confidences) / len(confidences), 1) if confidences else None
+                metrics["avg_latency_ms"] = (
+                    round(sum(latencies) / len(latencies), 1) if latencies else None
+                )
+                metrics["avg_confidence"] = (
+                    round(sum(confidences) / len(confidences), 1)
+                    if confidences
+                    else None
+                )
 
                 abstained = sum(1 for v in verdicts if v in ("abstained", "abstain"))
-                metrics["abstention_rate"] = round(abstained / len(verdicts), 4) if verdicts else None
+                metrics["abstention_rate"] = (
+                    round(abstained / len(verdicts), 4) if verdicts else None
+                )
 
                 dist = {}
                 for v in verdicts:
@@ -259,11 +290,14 @@ def ingestion_status(
         with get_db_session() as session:
             counts = {}
             for row in session.execute(
-                sa_text("SELECT ingestion_status, COUNT(*) FROM documents GROUP BY ingestion_status")
+                sa_text(
+                    "SELECT ingestion_status, COUNT(*) FROM documents GROUP BY ingestion_status"
+                )
             ):
                 counts[row[0] or "unknown"] = row[1]
 
-            documents = session.execute(sa_text("""
+            documents = session.execute(
+                sa_text("""
                 SELECT
                     d.id,
                     d.title,
@@ -275,11 +309,13 @@ def ingestion_status(
                 FROM documents d
                 ORDER BY d.updated_at DESC
                 LIMIT 100
-            """)).fetchall()
+            """)
+            ).fetchall()
 
         log_tail = ""
         try:
             from packages.shared.config import LOG_DIR
+
             log_path = os.path.join(LOG_DIR, "ingestion_agent.log")
             with open(log_path, "r", errors="ignore") as f:
                 lines = f.readlines()
@@ -295,7 +331,9 @@ def ingestion_status(
                     "id": str(r.id),
                     "title": r.title,
                     "ingestion_status": r.ingestion_status,
-                    "graph_ready_at": r.graph_ready_at.isoformat() if r.graph_ready_at else None,
+                    "graph_ready_at": r.graph_ready_at.isoformat()
+                    if r.graph_ready_at
+                    else None,
                     "updated_at": r.updated_at.isoformat() if r.updated_at else None,
                     "chunk_count": r.chunk_count,
                     "last_error": r.last_error,
@@ -305,34 +343,44 @@ def ingestion_status(
             "log_tail": log_tail,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch ingestion status: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to fetch ingestion status: {e}"
+        )
 
 
 def _delete_document_from_neo4j(doc_id: str, chunk_ids) -> dict:
     """Remove the document's Policy/Clause nodes + edges, then orphaned entities."""
-    from codex.services.agents.tools.connections import ConnectionPool
+    from services.agents.tools.connections import ConnectionPool
 
     graph_summary = {"policy_deleted": 0, "clauses_deleted": 0, "orphans_deleted": 0}
     try:
         driver = ConnectionPool.get_neo4j()
         with driver.session() as session:
             with session.begin_transaction() as tx:
-                result = tx.run("MATCH (p:Policy {id: $doc_id}) DETACH DELETE p", doc_id=str(doc_id))
-                graph_summary["policy_deleted"] = result.consume().counters.nodes_deleted
+                result = tx.run(
+                    "MATCH (p:Policy {id: $doc_id}) DETACH DELETE p", doc_id=str(doc_id)
+                )
+                graph_summary["policy_deleted"] = (
+                    result.consume().counters.nodes_deleted
+                )
             if chunk_ids:
                 with session.begin_transaction() as tx:
                     result = tx.run(
                         "MATCH (c:Clause) WHERE c.id IN $chunk_ids DETACH DELETE c",
                         chunk_ids=[str(cid) for cid in chunk_ids],
                     )
-                    graph_summary["clauses_deleted"] = result.consume().counters.nodes_deleted
+                    graph_summary["clauses_deleted"] = (
+                        result.consume().counters.nodes_deleted
+                    )
             with session.begin_transaction() as tx:
                 result = tx.run(
                     "MATCH (n) "
                     "WHERE NOT n:Policy AND NOT n:Clause AND NOT n:Department "
                     "AND NOT (n)--() DELETE n"
                 )
-                graph_summary["orphans_deleted"] = result.consume().counters.nodes_deleted
+                graph_summary["orphans_deleted"] = (
+                    result.consume().counters.nodes_deleted
+                )
     except Exception as e:
         print(f"⚠️ Neo4j cleanup failed for {doc_id}: {e}")
     return graph_summary
@@ -359,25 +407,40 @@ async def delete_document(
         ).fetchone()
 
         if not row:
-            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Document {document_id} not found"
+            )
 
-        chunk_ids = [r[0] for r in session.execute(
-            sa_text("SELECT id FROM chunks WHERE document_id = :id"),
-            {"id": document_id},
-        ).fetchall()]
+        chunk_ids = [
+            r[0]
+            for r in session.execute(
+                sa_text("SELECT id FROM chunks WHERE document_id = :id"),
+                {"id": document_id},
+            ).fetchall()
+        ]
 
         try:
             # Citations FKs are NO ACTION — delete first (mirrors ingest.py force path)
-            session.execute(sa_text(
-                "DELETE FROM citations WHERE document_id = :id "
-                "OR chunk_id IN (SELECT id FROM chunks WHERE document_id = :id)"
-            ), {"id": document_id})
-            session.execute(sa_text("DELETE FROM entities WHERE document_id = :id"), {"id": document_id})
-            session.execute(sa_text("DELETE FROM documents WHERE id = :id"), {"id": document_id})
+            session.execute(
+                sa_text(
+                    "DELETE FROM citations WHERE document_id = :id "
+                    "OR chunk_id IN (SELECT id FROM chunks WHERE document_id = :id)"
+                ),
+                {"id": document_id},
+            )
+            session.execute(
+                sa_text("DELETE FROM entities WHERE document_id = :id"),
+                {"id": document_id},
+            )
+            session.execute(
+                sa_text("DELETE FROM documents WHERE id = :id"), {"id": document_id}
+            )
             session.commit()
         except Exception as e:
             session.rollback()
-            raise HTTPException(status_code=500, detail=f"Failed to delete document: {e}")
+            raise HTTPException(
+                status_code=500, detail=f"Failed to delete document: {e}"
+            )
 
     summary = _delete_document_from_neo4j(document_id, chunk_ids)
 

@@ -4,11 +4,11 @@ User management endpoints: admin-only CRUD for the users table.
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from codex.packages.shared.schemas import UserCreate, UserUpdate, UserListResponse
-from codex.packages.shared.db import get_db_session
-from codex.packages.shared.models import User
-from codex.packages.shared.auth import get_pwd_hash
-from codex.services.api.dependencies import require_admin, log_audit_action
+from packages.shared.schemas import UserCreate, UserUpdate, UserListResponse
+from packages.shared.db import get_db_session
+from packages.shared.models import User
+from packages.shared.auth import get_pwd_hash
+from services.api.dependencies import require_admin, log_audit_action
 
 router = APIRouter(tags=["users"])
 
@@ -39,7 +39,9 @@ async def create_user(user: UserCreate, current_user: dict = Depends(require_adm
     """Create a new user with admin-assigned password (admin only)."""
     try:
         with get_db_session() as session:
-            existing = session.query(User).filter(User.username == user.username).first()
+            existing = (
+                session.query(User).filter(User.username == user.username).first()
+            )
             if existing:
                 raise HTTPException(status_code=400, detail="Username already exists")
 
@@ -70,7 +72,9 @@ async def create_user(user: UserCreate, current_user: dict = Depends(require_adm
                 department=new_user.department,
                 access_level=new_user.access_level,
                 is_active=new_user.is_active,
-                created_at=new_user.created_at.isoformat() if new_user.created_at else "",
+                created_at=new_user.created_at.isoformat()
+                if new_user.created_at
+                else "",
             )
     except HTTPException:
         raise
