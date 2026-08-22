@@ -1,0 +1,49 @@
+=== T12 Dockerfile chown fix — Sat Aug 22 11:29:26 +06 2026 ===
+
+--- git diff Dockerfile ---
+diff --git a/Dockerfile b/Dockerfile
+index 5c0645c..7c328e3 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -27,11 +27,11 @@ COPY requirements.txt .
+ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+ 
+ # Copy app (respects .dockerignore: .env, archive, models, logs, .git excluded)
+-COPY . .
++COPY --chown=appuser:appuser . .
+ 
+ # Runtime dirs bind-mounted in compose; ensure writable for non-root
+ RUN mkdir -p /app/logs /app/state /app/.state /app/archive && \
+-    chown -R appuser:appuser /app
++    chown appuser:appuser /app/logs /app/state /app/.state /app/archive
+ 
+ USER appuser
+ 
+
+--- build timings (docker compose build api ui worker, total 3.657s wall) ---
+#8 CACHED
+#9 CACHED
+#10 CACHED
+#11 CACHED
+#12 [api 6/8] RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
+#12 CACHED
+#13 [api 7/8] COPY --chown=appuser:appuser . .
+#14 [ui 8/8] RUN mkdir -p /app/logs /app/state /app/.state /app/archive &&     chown appuser:appuser /app/logs /app/state /app/.state /app/archive
+
+--- docker compose ps ---
+[compose] 5 services:
+  codex-main-api-1 (codex-main-api) Up 50 seconds (healthy) [8000, 8000,  8501/tcp]
+  codex-main-neo4j-1 (neo4j:5.26) Up 51 minutes (healthy) [7474, 7474, … +3]
+  codex-main-postgres-1 (codex-main-postgres) Up 51 minutes (healthy) [5432, 5432]
+  codex-main-ui-1 (codex-main-ui) Up 38 seconds (healthy) [8000/tcp, 8501, 8501]
+  codex-main-worker-1 (codex-main-worker) Up 38 seconds (healthy) [8000/tcp,  8501/tcp]
+
+--- ownership: docker compose exec -T api ls -ln /app | head -5 ---
+total 16
+-rw-r--r-- 1 10001 10001 1504 Aug 22 05:27 Dockerfile
+-rw-r--r-- 1 10001 10001    0 Aug 17 16:08 __init__.py
+drwxr-xr-x 1 10001 10001  800 Aug 17 16:08 archive
+drwxr-xr-x 1 10001 10001  526 Aug 17 16:08 doc
+
+--- uid: docker compose exec -T api id -u ---
+10001

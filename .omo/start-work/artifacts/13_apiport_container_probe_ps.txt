@@ -1,0 +1,9 @@
+== in-container ui -> http://api:8000/login (T11 path) ==
+bearer
+== docker compose ps ==
+NAME                    IMAGE                 COMMAND                  SERVICE    CREATED             STATUS                       PORTS
+codex-main-api-1        codex-main-api        "sh -c ' python infr…"   api        54 seconds ago      Up 52 seconds (healthy)      8501/tcp, 0.0.0.0:8100->8000/tcp, [::]:8100->8000/tcp
+codex-main-neo4j-1      neo4j:5.26            "tini -g -- /startup…"   neo4j      3 hours ago         Up 2 hours (healthy)         0.0.0.0:7474->7474/tcp, [::]:7474->7474/tcp, 7473/tcp, 0.0.0.0:7687->7687/tcp, [::]:7687->7687/tcp
+codex-main-postgres-1   codex-main-postgres   "docker-entrypoint.s…"   postgres   3 hours ago         Up 2 hours (healthy)         0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+codex-main-ui-1         codex-main-ui         "sh -c 'exec python …"   ui         About an hour ago   Up About an hour (healthy)   8000/tcp, 0.0.0.0:8501->8501/tcp, [::]:8501->8501/tcp
+codex-main-worker-1     codex-main-worker     "sh -c 'exec python …"   worker     About an hour ago   Up About an hour (healthy)   8000/tcp, 8501/tcp

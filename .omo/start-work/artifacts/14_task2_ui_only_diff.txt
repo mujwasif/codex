@@ -1,0 +1,32 @@
+diff --git a/docker-compose.yml b/docker-compose.yml
+index b97ff4e..4ff95d7 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -14,8 +14,6 @@ services:
+       timeout: 5s
+       retries: 10
+       start_period: 15s
+-    ports:
+-      - "5432:5432"
+     restart: unless-stopped
+ 
+   neo4j:
+@@ -35,9 +33,6 @@ services:
+       timeout: 5s
+       retries: 10
+       start_period: 20s
+-    ports:
+-      - "7474:7474"
+-      - "7687:7687"
+     restart: unless-stopped
+ 
+   api:
+@@ -68,8 +63,6 @@ services:
+       && python infra/seed_users.py
+       && exec python -m uvicorn services.api.main:app --host 0.0.0.0 --port $${API_PORT:-8000}
+       "
+-    ports:
+-      - "${API_PORT:-8000}:8000"
+     healthcheck:
+       test: ["CMD-SHELL", "curl -fsS http://localhost:$${API_PORT:-8000}/health | grep -q '\"status\":\"healthy\"'"]
+       interval: 15s

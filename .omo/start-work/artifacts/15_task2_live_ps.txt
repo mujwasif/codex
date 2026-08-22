@@ -1,0 +1,14 @@
+=== docker compose ps (post-recreate, 2026-08-22T07:29:57Z) ===
+NAME                    IMAGE                 COMMAND                  SERVICE    CREATED          STATUS                    PORTS
+codex-main-api-1        codex-main-api        "sh -c ' python infr…"   api        45 seconds ago   Up 38 seconds (healthy)   8000/tcp, 8501/tcp
+codex-main-neo4j-1      neo4j:5.26            "tini -g -- /startup…"   neo4j      51 seconds ago   Up 43 seconds (healthy)   7473-7474/tcp, 7687/tcp
+codex-main-postgres-1   codex-main-postgres   "docker-entrypoint.s…"   postgres   51 seconds ago   Up 43 seconds (healthy)   5432/tcp
+codex-main-ui-1         codex-main-ui         "sh -c 'exec python …"   ui         2 hours ago      Up 2 hours (healthy)      8000/tcp, 0.0.0.0:8501->8501/tcp, [::]:8501->8501/tcp
+codex-main-worker-1     codex-main-worker     "sh -c 'exec python …"   worker     2 hours ago      Up 46 seconds (healthy)   8000/tcp, 8501/tcp
+
+=== ps --format health summary ===
+api healthy
+neo4j healthy
+postgres healthy
+ui healthy
+worker healthy

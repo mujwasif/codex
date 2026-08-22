@@ -1,0 +1,402 @@
+name: codex-main
+services:
+  api:
+    build:
+      context: /Users/sakib/Ai/codex-main
+      dockerfile: Dockerfile
+    command:
+      - sh
+      - -c
+      - ' python infra/check_dependencies.py --check-only && python -c ''from packages.shared.db import init_db; init_db()'' && python infra/seed_users.py && exec python -m uvicorn services.api.main:app --host 0.0.0.0 --port $${API_PORT:-8000} '
+    depends_on:
+      neo4j:
+        condition: service_healthy
+        required: true
+      postgres:
+        condition: service_healthy
+        required: true
+    environment:
+      ALGORITHM: HS256
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      ARCHIVE_DIR: ""
+      CLAIM_INTERVAL: "3"
+      CODEX_API_URL: http://127.0.0.1:8000
+      CODEX_DIR: ""
+      CORS_ORIGINS: '["http://localhost:8501","http://127.0.0.1:8501"]'
+      DATA_DIR: ""
+      DATABASE_URL: postgresql://codex_admin:change-this-password@postgres:5432/codex_db
+      DB_MAX_OVERFLOW: "20"
+      DB_POOL_SIZE: "10"
+      DEFAULT_SEARCH_MODE: hybrid
+      EMBEDDING_DEVICE: cpu
+      GRAPH_BATCH_SIZE: "30"
+      HISTORY_MAX_TOKENS: "2500"
+      HISTORY_TURNS: "5"
+      LLM_API_KEY: ""
+      LLM_BASE_URL: https://funkash.eu1.netbird.services/llm/v1
+      LLM_INGESTION_MODEL: hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL
+      LLM_MODEL: hf.co/Qwen/Qwen3-8B-GGUF:Q4_K_M
+      LLM_PROVIDER: api
+      LOG_DIR: /app/logs
+      MAX_CLAUSE_TOKENS: "200"
+      NEO4J_AUTH: neo4j/change-this-password
+      NEO4J_BOLT_PORT: "7687"
+      NEO4J_HTTP_PORT: "7474"
+      NEO4J_PASS: change-this-password
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      OVERLAP_TOKENS: "20"
+      PG_ADMIN_USER: postgres
+      PG_BIN: ""
+      PG_DATA: .data/postgres
+      POSTGRES_DB: codex_db
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PASSWORD: change-this-password
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: codex_admin
+      PYTHONPATH: /app
+      RERANKER_DEVICE: cpu
+      RERANKER_MODEL: BAAI/bge-reranker-base
+      RETRIEVER_DEVICE: cpu
+      RETRIEVER_MODEL: BAAI/bge-large-en-v1.5
+      RRF_K: "60"
+      SECRET_KEY: ""
+      SEED_DEFAULT_USERS: "true"
+      SLACK_BOT_TOKEN: ""
+      SLACK_DEFAULT_USERNAME: employee
+      SLACK_QUERY_TIMEOUT: "120"
+      SLACK_SIGNING_SECRET: ""
+      STATE_DIR: /app/state
+      TOKEN_EXPIRE_MINUTES: "30"
+      TOP_K_FINAL: "5"
+      TOP_K_RETRIEVAL: "20"
+      UI_PORT: "8501"
+      USE_LLM_FOR_CHUNKING: "true"
+      VENV_DIR: ""
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:$${API_PORT:-8000}/health | grep -q '"status":"healthy"'
+      timeout: 5s
+      interval: 15s
+      retries: 5
+      start_period: 40s
+    networks:
+      default: null
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /Users/sakib/Ai/codex-main/archive
+        target: /app/archive
+        read_only: true
+        bind: {}
+      - type: bind
+        source: /Users/sakib/Ai/codex-main/logs
+        target: /app/logs
+        bind: {}
+      - type: bind
+        source: /Users/sakib/Ai/codex-main/state
+        target: /app/state
+        bind: {}
+  neo4j:
+    environment:
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+      NEO4J_AUTH: neo4j/change-this-password
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --no-verbose
+        - --tries=1
+        - --spider
+        - http://localhost:7474/
+      timeout: 5s
+      interval: 10s
+      retries: 10
+      start_period: 20s
+    image: neo4j:5.26
+    networks:
+      default: null
+    restart: unless-stopped
+    volumes:
+      - type: volume
+        source: neo4j_data
+        target: /data
+        volume: {}
+      - type: volume
+        source: neo4j_logs
+        target: /logs
+        volume: {}
+  postgres:
+    build:
+      context: /Users/sakib/Ai/codex-main/infra/docker/postgres
+      dockerfile: Dockerfile
+    environment:
+      ALGORITHM: HS256
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      ARCHIVE_DIR: ""
+      CLAIM_INTERVAL: "3"
+      CODEX_API_URL: http://127.0.0.1:8000
+      CODEX_DIR: ""
+      CORS_ORIGINS: '["http://localhost:8501","http://127.0.0.1:8501"]'
+      DATA_DIR: ""
+      DATABASE_URL: postgresql://codex_admin:change-this-password@127.0.0.1:5432/codex_db
+      DB_MAX_OVERFLOW: "20"
+      DB_POOL_SIZE: "10"
+      DEFAULT_SEARCH_MODE: hybrid
+      EMBEDDING_DEVICE: cpu
+      GRAPH_BATCH_SIZE: "30"
+      HISTORY_MAX_TOKENS: "2500"
+      HISTORY_TURNS: "5"
+      LLM_API_KEY: ""
+      LLM_BASE_URL: https://funkash.eu1.netbird.services/llm/v1
+      LLM_INGESTION_MODEL: hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL
+      LLM_MODEL: hf.co/Qwen/Qwen3-8B-GGUF:Q4_K_M
+      LLM_PROVIDER: api
+      LOG_DIR: ""
+      MAX_CLAUSE_TOKENS: "200"
+      NEO4J_AUTH: neo4j/change-this-password
+      NEO4J_BOLT_PORT: "7687"
+      NEO4J_HTTP_PORT: "7474"
+      NEO4J_PASS: change-this-password
+      NEO4J_URI: bolt://127.0.0.1:7687
+      NEO4J_USER: neo4j
+      OVERLAP_TOKENS: "20"
+      PG_ADMIN_USER: postgres
+      PG_BIN: ""
+      PG_DATA: .data/postgres
+      POSTGRES_DB: codex_db
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PASSWORD: change-this-password
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: codex_admin
+      PYTHONPATH: ""
+      RERANKER_DEVICE: cpu
+      RERANKER_MODEL: BAAI/bge-reranker-base
+      RETRIEVER_DEVICE: cpu
+      RETRIEVER_MODEL: BAAI/bge-large-en-v1.5
+      RRF_K: "60"
+      SECRET_KEY: ""
+      SEED_DEFAULT_USERS: "true"
+      SLACK_BOT_TOKEN: ""
+      SLACK_DEFAULT_USERNAME: employee
+      SLACK_QUERY_TIMEOUT: "120"
+      SLACK_SIGNING_SECRET: ""
+      STATE_DIR: ""
+      TOKEN_EXPIRE_MINUTES: "30"
+      TOP_K_FINAL: "5"
+      TOP_K_RETRIEVAL: "20"
+      UI_PORT: "8501"
+      USE_LLM_FOR_CHUNKING: "true"
+      VENV_DIR: ""
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB
+      timeout: 5s
+      interval: 10s
+      retries: 10
+      start_period: 15s
+    networks:
+      default: null
+    restart: unless-stopped
+    volumes:
+      - type: volume
+        source: postgres_data
+        target: /var/lib/postgresql/data
+        volume: {}
+  ui:
+    build:
+      context: /Users/sakib/Ai/codex-main
+      dockerfile: Dockerfile
+    command:
+      - sh
+      - -c
+      - exec python -m streamlit run services/chat/ui.py --server.address 0.0.0.0 --server.port $${UI_PORT:-8501} --server.headless true
+    depends_on:
+      api:
+        condition: service_healthy
+        required: true
+    environment:
+      ALGORITHM: HS256
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      ARCHIVE_DIR: ""
+      CLAIM_INTERVAL: "3"
+      CODEX_API_URL: http://api:8000
+      CODEX_DIR: ""
+      CORS_ORIGINS: '["http://localhost:8501","http://127.0.0.1:8501"]'
+      DATA_DIR: ""
+      DATABASE_URL: postgresql://codex_admin:change-this-password@postgres:5432/codex_db
+      DB_MAX_OVERFLOW: "20"
+      DB_POOL_SIZE: "10"
+      DEFAULT_SEARCH_MODE: hybrid
+      EMBEDDING_DEVICE: cpu
+      GRAPH_BATCH_SIZE: "30"
+      HISTORY_MAX_TOKENS: "2500"
+      HISTORY_TURNS: "5"
+      LLM_API_KEY: ""
+      LLM_BASE_URL: https://funkash.eu1.netbird.services/llm/v1
+      LLM_INGESTION_MODEL: hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL
+      LLM_MODEL: hf.co/Qwen/Qwen3-8B-GGUF:Q4_K_M
+      LLM_PROVIDER: api
+      LOG_DIR: /app/logs
+      MAX_CLAUSE_TOKENS: "200"
+      NEO4J_AUTH: neo4j/change-this-password
+      NEO4J_BOLT_PORT: "7687"
+      NEO4J_HTTP_PORT: "7474"
+      NEO4J_PASS: change-this-password
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      OVERLAP_TOKENS: "20"
+      PG_ADMIN_USER: postgres
+      PG_BIN: ""
+      PG_DATA: .data/postgres
+      POSTGRES_DB: codex_db
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PASSWORD: change-this-password
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: codex_admin
+      PYTHONPATH: /app
+      RERANKER_DEVICE: cpu
+      RERANKER_MODEL: BAAI/bge-reranker-base
+      RETRIEVER_DEVICE: cpu
+      RETRIEVER_MODEL: BAAI/bge-large-en-v1.5
+      RRF_K: "60"
+      SECRET_KEY: ""
+      SEED_DEFAULT_USERS: "true"
+      SLACK_BOT_TOKEN: ""
+      SLACK_DEFAULT_USERNAME: employee
+      SLACK_QUERY_TIMEOUT: "120"
+      SLACK_SIGNING_SECRET: ""
+      STATE_DIR: /app/state
+      TOKEN_EXPIRE_MINUTES: "30"
+      TOP_K_FINAL: "5"
+      TOP_K_RETRIEVAL: "20"
+      UI_PORT: "8501"
+      USE_LLM_FOR_CHUNKING: "true"
+      VENV_DIR: ""
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl -fsS http://localhost:$${UI_PORT:-8501}/_stcore/health | grep -q ok
+      timeout: 5s
+      interval: 15s
+      retries: 5
+      start_period: 30s
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        target: 8501
+        published: "8501"
+        protocol: tcp
+    restart: unless-stopped
+  worker:
+    build:
+      context: /Users/sakib/Ai/codex-main
+      dockerfile: Dockerfile
+    command:
+      - sh
+      - -c
+      - exec python -m services.ingestion.ingestion_agent
+    depends_on:
+      api:
+        condition: service_healthy
+        required: true
+    environment:
+      ALGORITHM: HS256
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      ARCHIVE_DIR: ""
+      CLAIM_INTERVAL: "3"
+      CODEX_API_URL: http://127.0.0.1:8000
+      CODEX_DIR: ""
+      CORS_ORIGINS: '["http://localhost:8501","http://127.0.0.1:8501"]'
+      DATA_DIR: ""
+      DATABASE_URL: postgresql://codex_admin:change-this-password@postgres:5432/codex_db
+      DB_MAX_OVERFLOW: "20"
+      DB_POOL_SIZE: "10"
+      DEFAULT_SEARCH_MODE: hybrid
+      EMBEDDING_DEVICE: cpu
+      GRAPH_BATCH_SIZE: "30"
+      HISTORY_MAX_TOKENS: "2500"
+      HISTORY_TURNS: "5"
+      LLM_API_KEY: ""
+      LLM_BASE_URL: https://funkash.eu1.netbird.services/llm/v1
+      LLM_INGESTION_MODEL: hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:UD-Q4_K_XL
+      LLM_MODEL: hf.co/Qwen/Qwen3-8B-GGUF:Q4_K_M
+      LLM_PROVIDER: api
+      LOG_DIR: /app/logs
+      MAX_CLAUSE_TOKENS: "200"
+      NEO4J_AUTH: neo4j/change-this-password
+      NEO4J_BOLT_PORT: "7687"
+      NEO4J_HTTP_PORT: "7474"
+      NEO4J_PASS: change-this-password
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      OVERLAP_TOKENS: "20"
+      PG_ADMIN_USER: postgres
+      PG_BIN: ""
+      PG_DATA: .data/postgres
+      POSTGRES_DB: codex_db
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PASSWORD: change-this-password
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: codex_admin
+      PYTHONPATH: /app
+      RERANKER_DEVICE: cpu
+      RERANKER_MODEL: BAAI/bge-reranker-base
+      RETRIEVER_DEVICE: cpu
+      RETRIEVER_MODEL: BAAI/bge-large-en-v1.5
+      RRF_K: "60"
+      SECRET_KEY: ""
+      SEED_DEFAULT_USERS: "true"
+      SLACK_BOT_TOKEN: ""
+      SLACK_DEFAULT_USERNAME: employee
+      SLACK_QUERY_TIMEOUT: "120"
+      SLACK_SIGNING_SECRET: ""
+      STATE_DIR: /app/state
+      TOKEN_EXPIRE_MINUTES: "30"
+      TOP_K_FINAL: "5"
+      TOP_K_RETRIEVAL: "20"
+      UI_PORT: "8501"
+      USE_LLM_FOR_CHUNKING: "true"
+      VENV_DIR: ""
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - python -c "import os; pid=int(open(os.path.join(os.environ.get('STATE_DIR','/app/state'),'ingestion_worker.pid')).read().strip()); os.kill(pid, 0)"
+      timeout: 5s
+      interval: 15s
+      retries: 5
+      start_period: 20s
+    networks:
+      default: null
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /Users/sakib/Ai/codex-main/archive
+        target: /app/archive
+        read_only: true
+        bind: {}
+      - type: bind
+        source: /Users/sakib/Ai/codex-main/logs
+        target: /app/logs
+        bind: {}
+      - type: bind
+        source: /Users/sakib/Ai/codex-main/state
+        target: /app/state
+        bind: {}
+networks:
+  default:
+    name: codex-main_default
+volumes:
+  neo4j_data:
+    name: codex-main_neo4j_data
+  neo4j_logs:
+    name: codex-main_neo4j_logs
+  postgres_data:
+    name: codex-main_postgres_data

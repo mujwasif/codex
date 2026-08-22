@@ -1,0 +1,7 @@
+=== Host-side refusal probes (2026-08-22T07:30:26Z) — expect exit 7 (connection refused) on all four ===
+port 8000: curl_exit=7 body=[]
+port 5432: curl_exit=7 body=[]
+port 7687: curl_exit=7 body=[]
+port 8100: curl_exit=7 body=[]
+
+exit-code legend: 7=connection refused (EXPECTED), 28=timeout, 0=connected (FAIL)

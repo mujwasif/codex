@@ -1,0 +1,10 @@
+=== In-container probes (2026-08-22T07:31:24Z) ===
+--- (a) api self-health via localhost ---
+{"status":"healthy","database":"healthy","llama_server":"healthy","qwen_server":"configured","neo4j":"healthy","version":"0.1.0"}
+probe-a exit=0
+
+--- (b) ui container -> http://api:8000/login (container DNS, no host port) ---
+HTTP 200
+token_type = bearer
+access_token present = True
+probe-b exit=0

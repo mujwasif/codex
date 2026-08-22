@@ -1,0 +1,2 @@
+=== Host reachability: ui on 8501 (2026-08-22T07:30:36Z) — expect an HTTP status code ===
+GET http://127.0.0.1:8501 -> http_code=200 curl_exit=0

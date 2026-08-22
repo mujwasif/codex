@@ -1,0 +1,15 @@
+diff --git a/docker-compose.yml b/docker-compose.yml
+index b97ff4e..749e20d 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -69,7 +69,9 @@ services:
+       && exec python -m uvicorn services.api.main:app --host 0.0.0.0 --port $${API_PORT:-8000}
+       "
+     ports:
+-      - "${API_PORT:-8000}:8000"
++      # Host side pinned: .env sets API_PORT=8000, so ${API_PORT:-8100} still
++      # interpolates to 8000. Container side must stay 8000.
++      - "8100:8000"
+     healthcheck:
+       test: ["CMD-SHELL", "curl -fsS http://localhost:$${API_PORT:-8000}/health | grep -q '\"status\":\"healthy\"'"]
+       interval: 15s

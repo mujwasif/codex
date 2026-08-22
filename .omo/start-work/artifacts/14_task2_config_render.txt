@@ -1,0 +1,34 @@
+7:    command:
+8-      - sh
+9-      - -c
+--
+24:      CODEX_API_URL: http://127.0.0.1:8000
+25-      CODEX_DIR: ""
+26-      CORS_ORIGINS: '["http://localhost:8501","http://127.0.0.1:8501"]'
+--
+141:      CODEX_API_URL: http://127.0.0.1:8000
+142-      CODEX_DIR: ""
+143-      CORS_ORIGINS: '["http://localhost:8501","http://127.0.0.1:8501"]'
+--
+214:    command:
+215-      - sh
+216-      - -c
+--
+228:      CODEX_API_URL: http://api:8000
+229-      CODEX_DIR: ""
+230-      CORS_ORIGINS: '["http://localhost:8501","http://127.0.0.1:8501"]'
+--
+291:    ports:
+292-      - mode: ingress
+293-        target: 8501
+294:        published: "8501"
+295-        protocol: tcp
+296-    restart: unless-stopped
+--
+301:    command:
+302-      - sh
+303-      - -c
+--
+315:      CODEX_API_URL: http://127.0.0.1:8000
+316-      CODEX_DIR: ""
+317-      CORS_ORIGINS: '["http://localhost:8501","http://127.0.0.1:8501"]'

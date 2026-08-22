@@ -27,11 +27,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 
 # Copy app (respects .dockerignore: .env, archive, models, logs, .git excluded)
-COPY . .
+COPY --chown=appuser:appuser . .
 
 # Runtime dirs bind-mounted in compose; ensure writable for non-root
 RUN mkdir -p /app/logs /app/state /app/.state /app/archive && \
-    chown -R appuser:appuser /app
+    chown appuser:appuser /app/logs /app/state /app/.state /app/archive
 
 USER appuser
 

@@ -1,0 +1,7 @@
+== GET http://127.0.0.1:8100/health ==
+{"status":"healthy","database":"healthy","llama_server":"healthy","qwen_server":"configured","neo4j":"healthy","version":"0.1.0"}
+== POST http://127.0.0.1:8100/login ==
+{"access_token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImFkbWluIiwiYWNjZXNzX2xldmVsIjozLCJleHAiOjE3ODczODI2NjZ9.z4ktU9dZEnuGlvckIVb_Det60iuZSb4ac7q-IExAvpc","token_type":"bearer"}
+== GET http://127.0.0.1:8000/health (expect refused) ==
+curl: (7) Failed to connect to 127.0.0.1 port 8000 after 0 ms: Couldn't connect to server
+exit=7
