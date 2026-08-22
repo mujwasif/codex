@@ -48,7 +48,7 @@ services:
       STATE_DIR: /app/state
       PYTHONPATH: /app
     volumes:
-      - ./archive:/app/archive:ro
+      - ./archive:/app/archive
       - ./logs:/app/logs
       - ./state:/app/state
     depends_on:
@@ -109,7 +109,7 @@ services:
       STATE_DIR: /app/state
       PYTHONPATH: /app
     volumes:
-      - ./archive:/app/archive:ro
+      - ./archive:/app/archive
       - ./logs:/app/logs
       - ./state:/app/state
     depends_on:
@@ -138,7 +138,7 @@ services:
       TEST_DB_NAME: codex_test_db
       PYTHONPATH: /app
     volumes:
-      - ./archive:/app/archive:ro
+      - ./archive:/app/archive
       - hf_cache:/root/.cache/huggingface
     depends_on:
       postgres:
