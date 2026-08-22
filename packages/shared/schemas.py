@@ -6,10 +6,12 @@ from enum import Enum
 
 # ============ User Models ============
 
+
 class User(BaseModel):
     username: str
     department: str
     access_level: int  # 1=Standard, 2=Manager, 3=Admin
+
 
 class UserCreate(BaseModel):
     username: str
@@ -17,15 +19,18 @@ class UserCreate(BaseModel):
     department: str
     access_level: int
 
+
 class UserResponse(BaseModel):
     username: str
     department: str
     access_level: int
     is_active: bool
 
+
 class UserUpdate(BaseModel):
     department: Optional[str] = None
     access_level: Optional[int] = Field(None, ge=1, le=3)
+
 
 class UserListResponse(BaseModel):
     id: str
@@ -35,9 +40,11 @@ class UserListResponse(BaseModel):
     is_active: bool
     created_at: str
 
+
 class Token(BaseModel):
     access_token: str
     token_type: str
+
 
 class TokenData(BaseModel):
     username: Optional[str] = None
@@ -46,10 +53,12 @@ class TokenData(BaseModel):
 
 # ============ Query Models ============
 
+
 class QueryCreate(BaseModel):
     question: str = Field(..., min_length=1, max_length=5000)
     intent: Optional[str] = None  # 'policy_lookup', 'approval_check', 'compliance'
     search_mode: Optional[str] = "hybrid"  # "vector" | "hybrid" | "bm25"
+
 
 class QueryResponse(BaseModel):
     id: str
@@ -65,6 +74,7 @@ class QueryResponse(BaseModel):
 
 # ============ Answer Models ============
 
+
 class CitationResponse(BaseModel):
     id: str
     chunk_id: str
@@ -74,6 +84,7 @@ class CitationResponse(BaseModel):
     score: Optional[float]
     section_path: Optional[str] = None  # Where the quote sits in the document
     quote: Optional[str] = None  # Exact source text (fetched from retrieved context)
+
 
 class AnswerResponse(BaseModel):
     id: str
@@ -91,8 +102,10 @@ class AnswerResponse(BaseModel):
     missing: List[str] = []  # Required approvals/docs not satisfied
     created_at: str
 
+
 class QueryResult(BaseModel):
     """Complete query result with answer and citations."""
+
     answer: str
     verdict: str
     confidence: float
@@ -103,9 +116,11 @@ class QueryResult(BaseModel):
 
 # ============ Feedback Models ============
 
+
 class FeedbackCreate(BaseModel):
     answer_id: str
     rating: int = Field(..., ge=1, le=5)
+
 
 class FeedbackResponse(BaseModel):
     id: str
@@ -116,6 +131,7 @@ class FeedbackResponse(BaseModel):
 
 
 # ============ Document Models ============
+
 
 class DocumentResponse(BaseModel):
     id: str
@@ -130,8 +146,10 @@ class DocumentResponse(BaseModel):
     created_at: str
     updated_at: str
 
+
 class DocumentListResponse(BaseModel):
     """Document with chunk/entity counts."""
+
     id: str
     title: str
     type: Optional[str]
@@ -140,11 +158,14 @@ class DocumentListResponse(BaseModel):
     entity_count: int = 0
     created_at: str
 
+
 class DocumentDetailResponse(BaseModel):
     """Document with its chunks and entities."""
+
     document: DocumentResponse
     chunks: List["ChunkResponse"] = []
     entities: List["EntityResponse"] = []
+
 
 class ChunkResponse(BaseModel):
     id: str
@@ -156,20 +177,26 @@ class ChunkResponse(BaseModel):
     token_count: Optional[int]
     created_at: str
 
+
 class PaginatedChunksResponse(BaseModel):
     """Paginated chunk list."""
+
     chunks: List[ChunkResponse] = []
     total: int
     limit: int
     offset: int
 
+
 class ChunkDetailResponse(BaseModel):
     """Chunk with document info."""
+
     chunk: ChunkResponse
     document_title: Optional[str] = None
 
+
 class SimilarClauseResponse(BaseModel):
     """A chunk with its similarity score to a source clause."""
+
     chunk: ChunkResponse
     similarity: float
     document_title: Optional[str] = None
@@ -177,8 +204,10 @@ class SimilarClauseResponse(BaseModel):
 
 # ============ Conflict Models ============
 
+
 class ConflictClauseInfo(BaseModel):
     """Clause metadata inside a conflict record."""
+
     id: str
     document_id: str
     document_title: str
@@ -191,14 +220,16 @@ class ConflictClauseInfo(BaseModel):
     status: Optional[str] = None
     page: Optional[int] = None
 
+
 class ConflictPair(BaseModel):
     """A confirmed or candidate conflict between two clauses."""
+
     clause_a: ConflictClauseInfo
     clause_b: ConflictClauseInfo
     similarity: float
     conflict: bool
     reason: str
-    source: str          # "llm" | "version_check" | "neo4j"
+    source: str  # "llm" | "version_check" | "neo4j"
     status: str = "confirmed_conflict"
     confidence: float = Field(0.0, ge=0.0, le=1.0)
     subject: Optional[str] = None
@@ -211,6 +242,7 @@ class ConflictPair(BaseModel):
 
 class ConflictAnalysisResponse(BaseModel):
     """Auditable Clause-vs-Corpus analysis metadata."""
+
     status: str = "complete"
     conflicts: List[ConflictPair] = []
     total_candidates: int = 0
@@ -220,24 +252,30 @@ class ConflictAnalysisResponse(BaseModel):
     truncated: bool = False
     inconclusive: bool = False
 
+
 class ConflictCompareRequest(BaseModel):
     """Request body for POST /v1/conflicts/compare."""
+
     document_ids: Optional[List[str]] = Field(None, min_length=2, max_length=3)
     document_names: Optional[List[str]] = Field(None, min_length=2, max_length=3)
     similarity_threshold: float = Field(0.7, ge=0.0, le=1.0)
     max_pairs: int = Field(100, ge=1, le=500)
     max_llm_calls: int = Field(15, ge=1, le=50)
 
+
 class DocumentConflictGroup(BaseModel):
     """Conflicts grouped by a document."""
+
     document_id: str
     document_title: str
     conflicts: List[ConflictPair] = []
     unchecked_candidate_count: int = 0
     total_candidate_count: int = 0
 
+
 class ConflictCompareResponse(BaseModel):
     """Response for POST /v1/conflicts/compare."""
+
     doc_pairs: List[Dict[str, Any]] = []
     total_conflicts: int = 0
     total_candidates: int = 0
@@ -245,8 +283,10 @@ class ConflictCompareResponse(BaseModel):
     similarity_threshold: float = 0.7
     truncated: bool = False
 
+
 class DocumentConflictsResponse(BaseModel):
     """Response for GET /documents/{doc_id}/conflicts."""
+
     document_id: str
     document_title: str
     conflicting_documents: List[DocumentConflictGroup] = []
@@ -257,6 +297,7 @@ class DocumentConflictsResponse(BaseModel):
 
 
 # ============ Entity Models ============
+
 
 class EntityResponse(BaseModel):
     id: str
@@ -269,12 +310,14 @@ class EntityResponse(BaseModel):
 
 # ============ Department Models ============
 
+
 class DepartmentResponse(BaseModel):
     name: str
     access_level: Optional[int] = None
 
 
 # ============ Audit Log Models ============
+
 
 class AuditLogResponse(BaseModel):
     id: str
@@ -286,9 +329,11 @@ class AuditLogResponse(BaseModel):
 
 # ============ Health Check ============
 
+
 class HealthResponse(BaseModel):
     status: str
     database: str
     llama_server: str
     qwen_server: str = "unknown"
+    neo4j: str = "unknown"
     version: str = "0.1.0"

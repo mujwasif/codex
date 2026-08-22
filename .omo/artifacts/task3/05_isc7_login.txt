@@ -1,0 +1,15 @@
+=== ISC-7: admin login ===
+Sat Aug 22 02:48:46 +06 2026
+HTTP_STATUS:200
+token_present: True
+token_type: bearer
+token_prefix: eyJhbGciOiJI...
+other_keys: ['token_type']
+
+=== ISC-7: compose ps ===
+NAME                    IMAGE                 COMMAND                  SERVICE    CREATED              STATUS                        PORTS
+codex-main-api-1        codex-main-api        "sh -c ' python infr…"   api        About a minute ago   Up About a minute (healthy)   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp, 8501/tcp
+codex-main-neo4j-1      neo4j:5.26            "tini -g -- /startup…"   neo4j      About a minute ago   Up About a minute (healthy)   0.0.0.0:7474->7474/tcp, [::]:7474->7474/tcp, 7473/tcp, 0.0.0.0:7687->7687/tcp, [::]:7687->7687/tcp
+codex-main-postgres-1   codex-main-postgres   "docker-entrypoint.s…"   postgres   About a minute ago   Up About a minute (healthy)   0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+codex-main-ui-1         codex-main-ui         "sh -c 'exec python …"   ui         About a minute ago   Up 58 seconds (healthy)       8000/tcp, 0.0.0.0:8501->8501/tcp, [::]:8501->8501/tcp
+codex-main-worker-1     codex-main-worker     "sh -c 'exec python …"   worker     About a minute ago   Up 58 seconds (healthy)       8000/tcp, 8501/tcp

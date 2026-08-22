@@ -1,0 +1,66 @@
+Sat Aug 22 02:33:19 +06 2026
+--- versions
+Docker version 29.4.0, build 9d7ad9f
+Docker Compose version v5.1.2
+--- ps -a (baseline)
+NAME                    IMAGE                 COMMAND                  SERVICE    CREATED       STATUS                         PORTS
+codex-main-api-1        codex-main-api        "sh -c ' export PYTH…"   api        3 hours ago   Exited (1) About an hour ago   
+codex-main-neo4j-1      neo4j:5.26            "tini -g -- /startup…"   neo4j      3 hours ago   Up About an hour (healthy)     0.0.0.0:7474->7474/tcp, [::]:7474->7474/tcp, 7473/tcp, 0.0.0.0:7687->7687/tcp, [::]:7687->7687/tcp
+codex-main-postgres-1   codex-main-postgres   "docker-entrypoint.s…"   postgres   3 hours ago   Up About an hour (healthy)     0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+codex-main-ui-1         codex-main-ui         "sh -c ' exec python…"   ui         3 hours ago   Up About an hour               0.0.0.0:8501->8501/tcp, [::]:8501->8501/tcp
+codex-main-worker-1     codex-main-worker     "sh -c ' exec python…"   worker     3 hours ago   Exited (1) About an hour ago   
+--- volumes
+local     codex-main_neo4j_data
+local     codex-main_neo4j_logs
+local     codex-main_postgres_data
+--- images
+WARNING: This output is designed for human readability. For machine-readable output, please use --format.
+codex-main-api:latest        be0257b70fea       2.35GB          501MB   U    
+codex-main-postgres:latest   aea03035ed79        657MB          159MB   U    
+codex-main-ui:latest         2323bff67a6e       2.35GB          501MB   U    
+codex-main-worker:latest     7986e3be9113       2.35GB          501MB   U    
+neo4j:5.26                   f79a46ab4e8d        995MB          360MB   U    
+postgres:16-alpine           cf78e76683b9        412MB          115MB        
+--- api last logs
+  File "/usr/local/lib/python3.10/site-packages/uvicorn/_compat.py", line 60, in asyncio_run
+    return loop.run_until_complete(main)
+  File "/usr/local/lib/python3.10/asyncio/base_events.py", line 649, in run_until_complete
+    return future.result()
+  File "/usr/local/lib/python3.10/site-packages/uvicorn/server.py", line 79, in serve
+    await self._serve(sockets)
+  File "/usr/local/lib/python3.10/site-packages/uvicorn/server.py", line 86, in _serve
+    config.load()
+  File "/usr/local/lib/python3.10/site-packages/uvicorn/config.py", line 441, in load
+    self.loaded_app = import_from_string(self.app)
+  File "/usr/local/lib/python3.10/site-packages/uvicorn/importer.py", line 22, in import_from_string
+    raise exc from None
+  File "/usr/local/lib/python3.10/site-packages/uvicorn/importer.py", line 19, in import_from_string
+    module = importlib.import_module(module_str)
+  File "/usr/local/lib/python3.10/importlib/__init__.py", line 126, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+  File "<frozen importlib._bootstrap>", line 1050, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1027, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1006, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 688, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 883, in exec_module
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "/app/services/api/main.py", line 12, in <module>
+    from codex.services.ingestion.bm25_index import BM25Index
+ModuleNotFoundError: No module named 'codex'
+
+--- worker last logs
+  File "/usr/local/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/usr/local/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/app/services/ingestion/ingestion_agent.py", line 29, in <module>
+    from codex.packages.shared.db import get_db_session, init_db
+ModuleNotFoundError: No module named 'codex'
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/usr/local/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/app/services/ingestion/ingestion_agent.py", line 29, in <module>
+    from codex.packages.shared.db import get_db_session, init_db
+ModuleNotFoundError: No module named 'codex'

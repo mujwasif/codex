@@ -69,6 +69,13 @@ _run_worker = True
 
 def _pid_is_worker(pid: int) -> bool:
     """True only if the PID belongs to a running ingestion worker process."""
+    if pid == os.getpid():
+        # The lockfile names THIS process. That cannot be another live worker
+        # (PIDs are unique among live processes in a PID namespace); it is a
+        # stale leftover from a previous incarnation — e.g. a prior container
+        # where the worker ran as PID 1 and the bind-mounted state dir
+        # outlived it. Report not-a-worker so the caller treats it as stale.
+        return False
     try:
         with open(f"/proc/{pid}/cmdline", "rb") as f:
             cmdline = f.read().decode(errors="ignore")

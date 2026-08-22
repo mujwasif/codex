@@ -1,0 +1,21 @@
+=== git status --porcelain (before T4) ===
+ M Dockerfile
+ M packages/shared/schemas.py
+ M requirements.txt
+ M services/api/routers/health.py
+?? .omo/
+?? DOCKER_PLAN.md
+?? docker-compose.yml
+?? infra/docker/
+?? state/
+
+=== HEAD ===
+d5824eee2a7c886150e04f4fc9087a0caea631bc
+
+=== docker compose ps (before T4) ===
+NAME                    IMAGE                 COMMAND                  SERVICE    CREATED          STATUS                    PORTS
+codex-main-api-1        codex-main-api        "sh -c ' python infr…"   api        23 minutes ago   Up 23 minutes (healthy)   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp, 8501/tcp
+codex-main-neo4j-1      neo4j:5.26            "tini -g -- /startup…"   neo4j      23 minutes ago   Up 23 minutes (healthy)   0.0.0.0:7474->7474/tcp, [::]:7474->7474/tcp, 7473/tcp, 0.0.0.0:7687->7687/tcp, [::]:7687->7687/tcp
+codex-main-postgres-1   codex-main-postgres   "docker-entrypoint.s…"   postgres   23 minutes ago   Up 23 minutes (healthy)   0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp
+codex-main-ui-1         codex-main-ui         "sh -c 'exec python …"   ui         23 minutes ago   Up 23 minutes (healthy)   8000/tcp, 0.0.0.0:8501->8501/tcp, [::]:8501->8501/tcp
+codex-main-worker-1     codex-main-worker     "sh -c 'exec python …"   worker     23 minutes ago   Up 23 minutes (healthy)   8000/tcp, 8501/tcp

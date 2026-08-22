@@ -1,0 +1,164 @@
+services:
+  postgres:
+    build: ./infra/docker/postgres
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-codex_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-password}
+      POSTGRES_DB: ${POSTGRES_DB:-codex_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5.26
+    # No env_file here: the neo4j entrypoint maps every NEO4J_* var to a config
+    # setting, so leaking NEO4J_PASS from .env aborts boot ("Unrecognized
+    # setting: PASS"). Auth is injected below via compose-level interpolation.
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASS:-change-this-password}
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:7474/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    restart: unless-stopped
+
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-codex_admin}:${POSTGRES_PASSWORD:-change-this-password}@postgres:5432/${POSTGRES_DB:-codex_db}
+      NEO4J_URI: bolt://neo4j:7687
+      API_HOST: 0.0.0.0
+      API_PORT: ${API_PORT:-8000}
+      CORS_ORIGINS: '["http://localhost:8501","http://127.0.0.1:8501"]'
+      LOG_DIR: /app/logs
+      STATE_DIR: /app/state
+      PYTHONPATH: /app
+    volumes:
+      - ./archive:/app/archive:ro
+      - ./logs:/app/logs
+      - ./state:/app/state
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    command: >
+      sh -c "
+      python infra/check_dependencies.py --check-only
+      && python -c 'from packages.shared.db import init_db; init_db()'
+      && python infra/seed_users.py
+      && exec python -m uvicorn services.api.main:app --host 0.0.0.0 --port $${API_PORT:-8000}
+      "
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:$${API_PORT:-8000}/health | grep -q '\"status\":\"healthy\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    restart: unless-stopped
+
+  ui:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-codex_admin}:${POSTGRES_PASSWORD:-change-this-password}@postgres:5432/${POSTGRES_DB:-codex_db}
+      NEO4J_URI: bolt://neo4j:7687
+      API_HOST: 0.0.0.0
+      API_PORT: ${API_PORT:-8000}
+      CORS_ORIGINS: '["http://localhost:8501","http://127.0.0.1:8501"]'
+      LOG_DIR: /app/logs
+      STATE_DIR: /app/state
+      PYTHONPATH: /app
+    depends_on:
+      api:
+        condition: service_healthy
+    command: >
+      sh -c "exec python -m streamlit run services/chat/ui.py --server.address 0.0.0.0 --server.port $${UI_PORT:-8501} --server.headless true"
+    ports:
+      - "${UI_PORT:-8501}:8501"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:$${UI_PORT:-8501}/_stcore/health | grep -q ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  worker:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-codex_admin}:${POSTGRES_PASSWORD:-change-this-password}@postgres:5432/${POSTGRES_DB:-codex_db}
+      NEO4J_URI: bolt://neo4j:7687
+      LOG_DIR: /app/logs
+      STATE_DIR: /app/state
+      PYTHONPATH: /app
+    volumes:
+      - ./archive:/app/archive:ro
+      - ./logs:/app/logs
+      - ./state:/app/state
+    depends_on:
+      api:
+        condition: service_healthy
+    command: >
+      sh -c "exec python -m services.ingestion.ingestion_agent"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os; pid=int(open(os.path.join(os.environ.get('STATE_DIR','/app/state'),'ingestion_worker.pid')).read().strip()); os.kill(pid, 0)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  tests:
+    build: .
+    profiles: ["test"]
+    env_file: .env
+    environment:
+      # Isolated test database on the compose postgres — NEVER codex_db.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-codex_admin}:${POSTGRES_PASSWORD:-change-this-password}@postgres:5432/codex_test_db
+      NEO4J_URI: bolt://neo4j:7687
+      LOG_DIR: /tmp/logs
+      STATE_DIR: /tmp/state
+      TEST_DB_NAME: codex_test_db
+      PYTHONPATH: /app
+    volumes:
+      - ./archive:/app/archive:ro
+      - hf_cache:/root/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    # Never starts uvicorn/api: runs the isolated-DB lifecycle + every suite
+    # under tests/ (unittest discovery + bare-function main() suites).
+    command: >
+      sh -c "exec sh infra/docker/run_tests.sh"
+    restart: "no"
+
+volumes:
+  postgres_data:
+  neo4j_data:
+  neo4j_logs:
+  hf_cache:

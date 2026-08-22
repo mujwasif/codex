@@ -1,0 +1,15 @@
+=== ISC-1: deep health ===
+Sat Aug 22 02:48:18 +06 2026
+{"status":"healthy","database":"healthy","llama_server":"unhealthy","qwen_server":"configured","neo4j":"healthy","version":"0.1.0"}{
+    "status": "healthy",
+    "database": "healthy",
+    "llama_server": "unhealthy",
+    "qwen_server": "configured",
+    "neo4j": "healthy",
+    "version": "0.1.0"
+}
+
+=== runtime env wiring (non-secret keys only) ===
+SEED_DEFAULT_USERS=true
+POSTGRES_DB=codex_db
+PYTHONPATH=/app

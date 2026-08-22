@@ -1,0 +1,9 @@
+ M Dockerfile
+ M packages/shared/schemas.py
+ M requirements.txt
+ M services/api/routers/health.py
+?? .omo/
+?? DOCKER_PLAN.md
+?? docker-compose.yml
+?? infra/docker/
+?? state/

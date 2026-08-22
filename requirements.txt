@@ -39,4 +39,7 @@ slack-sdk==3.43.0
 streamlit==1.60.0
 
 # CPU embeddings and reranking. LLM generation is provided by the hosted API.
-torch==2.5.1+cpu
+# torch: plain PyPI pin — the historical 2.5.1+cpu wheel was pruned from the
+# PyTorch CPU index (its +cpu builds now start at 2.6.0), so the +cpu tag is
+# uninstallable on cold builds (Dockerfile passes --extra-index-url anyway).
+torch==2.5.1

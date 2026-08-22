@@ -19,6 +19,7 @@ async def health_check():
     db_status = "unknown"
     reasoner_status = "unknown"
     ingestion_llm_status = "unknown"
+    neo4j_status = "unknown"
 
     try:
         with get_db_session() as session:
@@ -26,6 +27,20 @@ async def health_check():
             db_status = "healthy"
     except Exception:
         db_status = "unavailable"
+
+    try:
+        from packages.shared.config import NEO4J_URI, NEO4J_USER, NEO4J_PASS
+        from neo4j import GraphDatabase
+
+        auth = (NEO4J_USER, NEO4J_PASS) if NEO4J_PASS else None
+        driver = GraphDatabase.driver(NEO4J_URI, auth=auth)
+        try:
+            driver.verify_connectivity()
+            neo4j_status = "healthy"
+        finally:
+            driver.close()
+    except Exception:
+        neo4j_status = "unavailable"
 
     try:
         from packages.shared.llm_client import health_check
@@ -46,6 +61,7 @@ async def health_check():
         database=db_status,
         llama_server=reasoner_status,
         qwen_server=ingestion_llm_status,
+        neo4j=neo4j_status,
     )
 
 

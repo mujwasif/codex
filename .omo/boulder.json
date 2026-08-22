@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "active_work_id": "docker-fullstack-plan-e05b3519",
+  "works": {
+    "docker-fullstack-plan-e05b3519": {
+      "work_id": "docker-fullstack-plan-e05b3519",
+      "active_plan": "/Users/sakib/Ai/codex-main/.omo/plans/docker-fullstack.plan.md",
+      "plan_name": "docker-fullstack.plan",
+      "status": "completed",
+      "started_at": "2026-08-22T03:49:12.239Z",
+      "updated_at": "2026-08-22T04:12:19.860Z",
+      "session_ids": [
+        "opencode:ses_fd869c465ffeMSgPRlXokVaO18"
+      ],
+      "session_origins": {
+        "opencode:ses_fd869c465ffeMSgPRlXokVaO18": "direct"
+      },
+      "agent": "atlas",
+      "task_sessions": {},
+      "ended_at": "2026-08-22T04:12:19.860Z",
+      "elapsed_ms": 1387621
+    }
+  },
+  "active_plan": "/Users/sakib/Ai/codex-main/.omo/plans/docker-fullstack.plan.md",
+  "started_at": "2026-08-22T03:49:12.239Z",
+  "status": "completed",
+  "updated_at": "2026-08-22T04:12:19.860Z",
+  "session_ids": [
+    "opencode:ses_fd869c465ffeMSgPRlXokVaO18"
+  ],
+  "session_origins": {
+    "opencode:ses_fd869c465ffeMSgPRlXokVaO18": "direct"
+  },
+  "plan_name": "docker-fullstack.plan",
+  "task_sessions": {},
+  "agent": "atlas",
+  "ended_at": "2026-08-22T04:12:19.860Z",
+  "elapsed_ms": 1387621
+}

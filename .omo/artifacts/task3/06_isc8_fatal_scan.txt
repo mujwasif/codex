@@ -1,0 +1,15 @@
+=== ISC-8: postgres runtime env ===
+POSTGRES_DB=codex_db
+POSTGRES_USER=codex_admin
+
+=== ISC-8: healthcheck definition (resolved) ===
+["CMD-SHELL","pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+
+=== ISC-8: 60s log window ===
+lines_in_window:        0
+FATAL_lines_in_60s_window: 0
+does_not_exist_lines_in_window: 0
+
+=== ISC-8: FULL log since boot ===
+total_lines:       57
+FATAL_lines_since_boot: 0

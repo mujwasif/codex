@@ -21,8 +21,10 @@ RUN adduser --disabled-password --gecos '' --uid 10001 appuser
 WORKDIR /app
 
 # Leverage layer cache: deps first
+# --extra-index-url: torch==2.5.1+cpu local-version wheels are published only on
+# the PyTorch CPU index, never on PyPI (cold builds fail without it).
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
 
 # Copy app (respects .dockerignore: .env, archive, models, logs, .git excluded)
 COPY . .

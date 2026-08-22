@@ -1,0 +1,5 @@
+api	Up 17 seconds (healthy)
+neo4j	Up 23 seconds (healthy)
+postgres	Up 23 seconds (healthy)
+ui	Up 11 seconds (healthy)
+worker	Up 11 seconds (healthy)

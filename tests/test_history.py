@@ -8,11 +8,12 @@ import sys
 from unittest.mock import patch, MagicMock
 
 # Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
 def _make_fake_session(queries_with_answers):
     """Create a mock DB session that returns the given (query, answer) pairs."""
+
     class _FakeQuery:
         def __init__(self, q_text, a_text, a_verdict, created_at):
             self.id = "qid"
@@ -41,8 +42,13 @@ def _make_fake_session(queries_with_answers):
             self._limit = n
             return self
 
+        def first(self):
+            # query.py resolves short ids as usernames via .first(); no such
+            # user here, so resolution falls through to the raw id.
+            return None
+
         def all(self):
-            return self._queries[:self._limit]
+            return self._queries[: self._limit]
 
     return _FakeSession()
 
@@ -64,7 +70,7 @@ def test_load_user_history_single_turn():
     q = MagicMock(
         question="What is the password policy?",
         created_at=datetime(2025, 1, 1, 10, 0),
-        answers=[MagicMock(answer="Passwords must be 12+ chars.", verdict="clear")]
+        answers=[MagicMock(answer="Passwords must be 12+ chars.", verdict="clear")],
     )
     fake_session = _make_fake_session([q])
     history = _load_user_history(fake_session, "user1")
@@ -81,17 +87,17 @@ def test_load_user_history_multiple_turns_order():
     q1 = MagicMock(
         question="First question",
         created_at=datetime(2025, 1, 1, 10, 0),
-        answers=[MagicMock(answer="First answer", verdict="clear")]
+        answers=[MagicMock(answer="First answer", verdict="clear")],
     )
     q2 = MagicMock(
         question="Second question",
         created_at=datetime(2025, 1, 1, 11, 0),
-        answers=[MagicMock(answer="Second answer", verdict="clear")]
+        answers=[MagicMock(answer="Second answer", verdict="clear")],
     )
     q3 = MagicMock(
         question="Third question",
         created_at=datetime(2025, 1, 1, 12, 0),
-        answers=[MagicMock(answer="Third answer", verdict="clear")]
+        answers=[MagicMock(answer="Third answer", verdict="clear")],
     )
     fake_session = _make_fake_session([q3, q2, q1])  # DB returns newest first
     history = _load_user_history(fake_session, "user1", limit=5)
@@ -111,7 +117,7 @@ def test_load_user_history_limit():
         q = MagicMock(
             question=f"Question {i}",
             created_at=datetime(2025, 1, 1, 10 + i, 0),
-            answers=[MagicMock(answer=f"Answer {i}", verdict="clear")]
+            answers=[MagicMock(answer=f"Answer {i}", verdict="clear")],
         )
         queries.insert(0, q)  # Question 9 ends up first (newest)
     fake_session = _make_fake_session(queries)
@@ -130,12 +136,10 @@ def test_load_user_history_skips_queries_without_answers():
     q_with_answer = MagicMock(
         question="Has answer",
         created_at=datetime(2025, 1, 1, 10, 0),
-        answers=[MagicMock(answer="Yes", verdict="clear")]
+        answers=[MagicMock(answer="Yes", verdict="clear")],
     )
     q_no_answer = MagicMock(
-        question="No answer",
-        created_at=datetime(2025, 1, 1, 11, 0),
-        answers=[]
+        question="No answer", created_at=datetime(2025, 1, 1, 11, 0), answers=[]
     )
     fake_session = _make_fake_session([q_with_answer, q_no_answer])
     history = _load_user_history(fake_session, "user1")
@@ -146,15 +150,20 @@ def test_load_user_history_skips_queries_without_answers():
 def test_build_pipeline_question_no_history():
     """Raw question returned when no history."""
     from services.api.routers.query import _build_pipeline_question
+
     assert _build_pipeline_question("What is X?", []) == "What is X?"
 
 
 def test_build_pipeline_question_with_history():
     """Conversation history is prepended correctly."""
     from services.api.routers.query import _build_pipeline_question
+
     history = [
-        {"question": "What is the password policy?", "answer": "Passwords must be 12+ chars."},
-        {"question": "What about sharing?", "answer": "Passwords shall not be shared."}
+        {
+            "question": "What is the password policy?",
+            "answer": "Passwords must be 12+ chars.",
+        },
+        {"question": "What about sharing?", "answer": "Passwords shall not be shared."},
     ]
     result = _build_pipeline_question("What about length?", history)
     assert "Conversation History:" in result
@@ -202,11 +211,17 @@ def main():
         ("Single turn", test_load_user_history_single_turn),
         ("Multiple turns order", test_load_user_history_multiple_turns_order),
         ("Limit parameter", test_load_user_history_limit),
-        ("Skips queries without answers", test_load_user_history_skips_queries_without_answers),
+        (
+            "Skips queries without answers",
+            test_load_user_history_skips_queries_without_answers,
+        ),
         ("Build question no history", test_build_pipeline_question_no_history),
         ("Build question with history", test_build_pipeline_question_with_history),
         ("History token budget", test_build_pipeline_question_respects_token_budget),
-        ("History chronological order", test_build_pipeline_question_keeps_chronological_order_after_budgeting),
+        (
+            "History chronological order",
+            test_build_pipeline_question_keeps_chronological_order_after_budgeting,
+        ),
     ]
     results = []
     for name, fn in tests:

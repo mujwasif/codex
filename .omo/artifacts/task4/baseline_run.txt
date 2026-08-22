@@ -1,0 +1,386 @@
+ Container codex-main-api-run-bf15f1559697 Creating 
+ Container codex-main-api-run-bf15f1559697 Created 
+test_budget_reports_incomplete_analysis (test_clause_vs_corpus_plan.ClauseVsCorpusPlanTests) ... Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights:  29%|██▉       | 115/391 [00:00<00:00, 1110.40it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 3268.00it/s]
+Loading weights:   0%|          | 0/201 [00:00<?, ?it/s]Loading weights: 100%|██████████| 201/201 [00:00<00:00, 7517.95it/s]
+ok
+test_different_roles_are_complementary (test_clause_vs_corpus_plan.ClauseVsCorpusPlanTests) ... ok
+test_returns_all_validated_conflicts (test_clause_vs_corpus_plan.ClauseVsCorpusPlanTests) ... ok
+test_live_document_conflicts (test_conflict_integration.TestLiveDatabase)
+Run document-vs-document conflict detection on real documents. ... skipped 'Set RUN_LIVE_TESTS=1 to run live database tests'
+test_live_similar_clauses (test_conflict_integration.TestLiveDatabase)
+Find similar clauses for a real chunk from the database. ... skipped 'Set RUN_LIVE_TESTS=1 to run live database tests'
+test_data_retention_conflict_detection (test_conflict_integration.TestType1_ClauseVsCorpus)
+Retention clause from Security vs HR and Vendor. ... 
+══════════════════════════════════════════════════════════════════════
+  TYPE 1: "Are there conflicting data retention rules?"
+══════════════════════════════════════════════════════════════════════
+Source chunks: 1 (IT Security Policy)
+Expanded chunks: 3 (+2 from other docs)
+  [1] IT Security Policy / 8.1.2: All employee data including personal records and access logs...
+  [2] HR Onboarding Policy / 7.3.1: Employee data must be retained for 3 years after departure. ...
+  [3] Vendor Management Policy / 6.2.3: Vendor data including contracts and access logs must be reta...
+
+  CONFLICT #1:
+    A: "All employee data including personal records and access logs must be retained fo..."
+       → IT Security Policy / 8.1.2
+    B: "Employee data must be retained for 3 years after departure. Records are then arc..."
+       → HR Onboarding Policy / 7.3.1
+    Similarity: 0.00 | Source: llm
+    Reason: 7-year vs 3-year employee data retention
+
+  CONFLICT #2:
+    A: "All employee data including personal records and access logs must be retained fo..."
+       → IT Security Policy / 8.1.2
+    B: "Vendor data including contracts and access logs must be retained for 5 years min..."
+       → Vendor Management Policy / 6.2.3
+    Similarity: 0.00 | Source: llm
+    Reason: 7-year vs 5-year data retention
+
+  CONFLICT #3:
+    A: "Employee data must be retained for 3 years after departure. Records are then arc..."
+       → HR Onboarding Policy / 7.3.1
+    B: "Vendor data including contracts and access logs must be retained for 5 years min..."
+       → Vendor Management Policy / 6.2.3
+    Similarity: 0.00 | Source: llm
+    Reason: 3-year vs 5-year data retention
+
+ok
+test_no_conflict_different_subjects (test_conflict_integration.TestType1_ClauseVsCorpus)
+Vendor review vs badge access — different subjects, no conflict. ... 
+══════════════════════════════════════════════════════════════════════
+  TYPE 1: "Do vendor access and badge rules conflict?"
+══════════════════════════════════════════════════════════════════════
+Source chunks: 1 (Vendor Management Policy)
+Expanded chunks: 1 (+0 from other docs)
+  [1] Vendor Management Policy / 4.1.2: Vendor access must be reviewed quarterly. Reviews are conduc...
+
+  No conflicts found.
+
+✅ PASSED — 0 conflict(s) detected
+ok
+test_no_conflict_single_clause (test_conflict_integration.TestType1_ClauseVsCorpus)
+MFA clause — only one clause about this topic, no conflict. ... 
+══════════════════════════════════════════════════════════════════════
+  TYPE 1: "Is there a conflict about MFA requirements?"
+══════════════════════════════════════════════════════════════════════
+Source chunks: 1 (IT Security Policy)
+Expanded chunks: 1 (+0 from other docs)
+
+  No conflicts found.
+
+✅ PASSED — 0 conflict(s) detected
+ok
+test_password_conflict_detection (test_conflict_integration.TestType1_ClauseVsCorpus)
+Password clause from Security vs similar from HR. ... 
+══════════════════════════════════════════════════════════════════════
+  TYPE 1: "Do these password policies conflict?"
+══════════════════════════════════════════════════════════════════════
+Source chunks: 1 (IT Security Policy)
+Expanded chunks: 2 (+1 from other docs)
+  [1] IT Security Policy / 5.1.3: All passwords must be changed every 90 days. This applies to...
+  [2] HR Onboarding Policy / 3.2.1: All passwords must be changed every 180 days. This applies t...
+
+  CONFLICT #1:
+    A: "All passwords must be changed every 90 days. This applies to all user accounts a..."
+       → IT Security Policy / 5.1.3
+    B: "All passwords must be changed every 180 days. This applies to all employees incl..."
+       → HR Onboarding Policy / 3.2.1
+    Similarity: 0.00 | Source: llm
+    Reason: 90-day vs 180-day password rotation for same subject
+
+ok
+test_hr_vs_vendor (test_conflict_integration.TestType2_DocumentVsDocument)
+HR Onboarding vs Vendor Management — 1 conflict (data retention). ... 
+══════════════════════════════════════════════════════════════════════
+  TYPE 2: HR Onboarding Policy vs Vendor Management Policy
+══════════════════════════════════════════════════════════════════════
+  HR Onboarding Policy vs Vendor Management Policy:
+    Candidates: 1
+    Conflicts: 1
+  CONFLICT #1:
+    A: "Employee data must be retained for 3 years after departure. Records are then arc..."
+       → HR Onboarding Policy / 7.3.1
+    B: "Vendor data including contracts and access logs must be retained for 5 years min..."
+       → Vendor Management Policy / 6.2.3
+    Similarity: 0.00 | Source: llm
+    Reason: 3-year vs 5-year data retention
+
+ok
+test_security_vs_hr (test_conflict_integration.TestType2_DocumentVsDocument)
+IT Security Policy vs HR Onboarding — 2 known conflicts. ... 
+══════════════════════════════════════════════════════════════════════
+  TYPE 2: IT Security Policy vs HR Onboarding Policy
+══════════════════════════════════════════════════════════════════════
+  IT Security Policy vs HR Onboarding Policy:
+    Candidates: 2
+    Conflicts: 2
+  CONFLICT #1:
+    A: "All passwords must be changed every 90 days. This applies to all user accounts a..."
+       → IT Security Policy / 5.1.3
+    B: "All passwords must be changed every 180 days. This applies to all employees incl..."
+       → HR Onboarding Policy / 3.2.1
+    Similarity: 0.00 | Source: llm
+    Reason: 90-day vs 180-day password rotation for same subject
+
+  CONFLICT #2:
+    A: "All employee data including personal records and access logs must be retained fo..."
+       → IT Security Policy / 8.1.2
+    B: "Employee data must be retained for 3 years after departure. Records are then arc..."
+       → HR Onboarding Policy / 7.3.1
+    Similarity: 0.00 | Source: llm
+    Reason: 7-year vs 3-year employee data retention
+
+ok
+test_security_vs_vendor (test_conflict_integration.TestType2_DocumentVsDocument)
+IT Security Policy vs Vendor Management — 1 conflict (data retention). ... 
+══════════════════════════════════════════════════════════════════════
+  TYPE 2: IT Security Policy vs Vendor Management Policy
+══════════════════════════════════════════════════════════════════════
+  IT Security Policy vs Vendor Management Policy:
+    Candidates: 1
+    Conflicts: 1
+  CONFLICT #1:
+    A: "All employee data including personal records and access logs must be retained fo..."
+       → IT Security Policy / 8.1.2
+    B: "Vendor data including contracts and access logs must be retained for 5 years min..."
+       → Vendor Management Policy / 6.2.3
+    Similarity: 0.00 | Source: llm
+    Reason: 7-year vs 5-year data retention
+
+ok
+test_three_way_comparison (test_conflict_integration.TestType2_DocumentVsDocument)
+All three documents compared at once. ... 
+══════════════════════════════════════════════════════════════════════
+  TYPE 2: Three-way comparison (Security vs HR vs Vendor)
+══════════════════════════════════════════════════════════════════════
+  Total doc pairs: 3
+  Total conflicts: 4
+  LLM calls used: 4
+  Truncated: False
+
+  IT Security Policy vs HR Onboarding Policy: 2 conflict(s)
+  CONFLICT #1:
+    A: "All passwords must be changed every 90 days. This applies to all user accounts a..."
+       → IT Security Policy / 5.1.3
+    B: "All passwords must be changed every 180 days. This applies to all employees incl..."
+       → HR Onboarding Policy / 3.2.1
+    Similarity: 0.00 | Source: llm
+    Reason: 90-day vs 180-day password rotation for same subject
+
+  CONFLICT #2:
+    A: "All employee data including personal records and access logs must be retained fo..."
+       → IT Security Policy / 8.1.2
+    B: "Employee data must be retained for 3 years after departure. Records are then arc..."
+       → HR Onboarding Policy / 7.3.1
+    Similarity: 0.00 | Source: llm
+    Reason: 7-year vs 3-year employee data retention
+
+  IT Security Policy vs Vendor Management Policy: 1 conflict(s)
+  CONFLICT #1:
+    A: "All employee data including personal records and access logs must be retained fo..."
+       → IT Security Policy / 8.1.2
+    B: "Vendor data including contracts and access logs must be retained for 5 years min..."
+       → Vendor Management Policy / 6.2.3
+    Similarity: 0.00 | Source: llm
+    Reason: 7-year vs 5-year data retention
+
+  HR Onboarding Policy vs Vendor Management Policy: 1 conflict(s)
+  CONFLICT #1:
+    A: "Employee data must be retained for 3 years after departure. Records are then arc..."
+       → HR Onboarding Policy / 7.3.1
+    B: "Vendor data including contracts and access logs must be retained for 5 years min..."
+       → Vendor Management Policy / 6.2.3
+    Similarity: 0.00 | Source: llm
+    Reason: 3-year vs 5-year data retention
+
+ok
+test_hr_policy_conflicts (test_conflict_integration.TestType3_DocumentVsCorpus)
+HR Onboarding Policy — find all documents that conflict with it. ... 
+══════════════════════════════════════════════════════════════════════
+  TYPE 2b: Which documents conflict with HR Onboarding Policy?
+══════════════════════════════════════════════════════════════════════
+  Total conflicts: 3
+  LLM calls used: 3
+
+  Conflicts in: IT Security Policy (doc-sec-001)
+  CONFLICT #1:
+    A: "All passwords must be changed every 180 days. This applies to all employees incl..."
+       → HR Onboarding Policy / 3.2.1
+    B: "All passwords must be changed every 90 days. This applies to all user accounts a..."
+       → IT Security Policy / 5.1.3
+    Similarity: 0.00 | Source: llm
+    Reason: 90-day vs 180-day password rotation for same subject
+
+  CONFLICT #2:
+    A: "Employee data must be retained for 3 years after departure. Records are then arc..."
+       → HR Onboarding Policy / 7.3.1
+    B: "All employee data including personal records and access logs must be retained fo..."
+       → IT Security Policy / 8.1.2
+    Similarity: 0.00 | Source: llm
+    Reason: 7-year vs 3-year employee data retention
+
+  Conflicts in: Vendor Management Policy (doc-vnd-003)
+  CONFLICT #1:
+    A: "Employee data must be retained for 3 years after departure. Records are then arc..."
+       → HR Onboarding Policy / 7.3.1
+    B: "Vendor data including contracts and access logs must be retained for 5 years min..."
+       → Vendor Management Policy / 6.2.3
+    Similarity: 0.00 | Source: llm
+    Reason: 3-year vs 5-year data retention
+
+ok
+test_security_policy_conflicts (test_conflict_integration.TestType3_DocumentVsCorpus)
+IT Security Policy — find all documents that conflict with it. ... 
+══════════════════════════════════════════════════════════════════════
+  TYPE 2b: Which documents conflict with IT Security Policy?
+══════════════════════════════════════════════════════════════════════
+  Total conflicts: 3
+  LLM calls used: 3
+  Truncated: False
+
+  Conflicts in: HR Onboarding Policy (doc-hr-002)
+    Candidates: 2
+  CONFLICT #1:
+    A: "All passwords must be changed every 90 days. This applies to all user accounts a..."
+       → IT Security Policy / 5.1.3
+    B: "All passwords must be changed every 180 days. This applies to all employees incl..."
+       → HR Onboarding Policy / 3.2.1
+    Similarity: 0.00 | Source: llm
+    Reason: 90-day vs 180-day password rotation for same subject
+
+  CONFLICT #2:
+    A: "All employee data including personal records and access logs must be retained fo..."
+       → IT Security Policy / 8.1.2
+    B: "Employee data must be retained for 3 years after departure. Records are then arc..."
+       → HR Onboarding Policy / 7.3.1
+    Similarity: 0.00 | Source: llm
+    Reason: 7-year vs 3-year employee data retention
+
+  Conflicts in: Vendor Management Policy (doc-vnd-003)
+    Candidates: 1
+  CONFLICT #1:
+    A: "All employee data including personal records and access logs must be retained fo..."
+       → IT Security Policy / 8.1.2
+    B: "Vendor data including contracts and access logs must be retained for 5 years min..."
+       → Vendor Management Policy / 6.2.3
+    Similarity: 0.00 | Source: llm
+    Reason: 7-year vs 5-year data retention
+
+ok
+test_vendor_policy_conflicts (test_conflict_integration.TestType3_DocumentVsCorpus)
+Vendor Management Policy — find all documents that conflict with it. ... 
+══════════════════════════════════════════════════════════════════════
+  TYPE 2b: Which documents conflict with Vendor Management Policy?
+══════════════════════════════════════════════════════════════════════
+  Total conflicts: 2
+  LLM calls used: 2
+
+  Conflicts in: IT Security Policy (doc-sec-001)
+  CONFLICT #1:
+    A: "Vendor data including contracts and access logs must be retained for 5 years min..."
+       → Vendor Management Policy / 6.2.3
+    B: "All employee data including personal records and access logs must be retained fo..."
+       → IT Security Policy / 8.1.2
+    Similarity: 0.00 | Source: llm
+    Reason: 7-year vs 5-year data retention
+
+  Conflicts in: HR Onboarding Policy (doc-hr-002)
+  CONFLICT #1:
+    A: "Vendor data including contracts and access logs must be retained for 5 years min..."
+       → Vendor Management Policy / 6.2.3
+    B: "Employee data must be retained for 3 years after departure. Records are then arc..."
+       → HR Onboarding Policy / 7.3.1
+    Similarity: 0.00 | Source: llm
+    Reason: 3-year vs 5-year data retention
+
+ok
+test_empty_conflict_answer (test_conflict_types.TestBuildConflictAnswer) ... ok
+test_multiple_conflict_answer (test_conflict_types.TestBuildConflictAnswer) ... ok
+test_structured_conflict_answer (test_conflict_types.TestBuildConflictAnswer) ... ok
+test_insufficient_docs (test_conflict_types.TestCompareDocumentChunks) ... ok
+test_two_doc_comparison (test_conflict_types.TestCompareDocumentChunks) ... ✅ ConnectionPool initialized
+Received notification from DBMS server: <GqlStatusObject gql_status='01N50', status_description='warn: label does not exist. The label `Clause` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=70, offset=70>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 70, 'line': 2, 'column': 70}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `CONFLICTS_WITH` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=46, offset=46>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 46, 'line': 2, 'column': 46}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `id` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=34, offset=34>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 34, 'line': 2, 'column': 34}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `id` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=3, column=30, offset=107>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 107, 'line': 3, 'column': 30}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `text_ref` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=30, offset=183>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 183, 'line': 4, 'column': 30}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N50', status_description='warn: label does not exist. The label `Clause` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=26, offset=26>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 26, 'line': 2, 'column': 26}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `clause_ref` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=3, column=52, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 3, 'column': 52}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+ok
+test_build_record (test_conflict_types.TestConflictRecord) ... ok
+test_finds_conflicting_doc (test_conflict_types.TestDetectConflictingDocuments) ... Received notification from DBMS server: <GqlStatusObject gql_status='01N50', status_description='warn: label does not exist. The label `Clause` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=70, offset=70>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 70, 'line': 2, 'column': 70}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `CONFLICTS_WITH` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=46, offset=46>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 46, 'line': 2, 'column': 46}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `id` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=34, offset=34>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 34, 'line': 2, 'column': 34}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `id` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=3, column=30, offset=107>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 107, 'line': 3, 'column': 30}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `text_ref` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=30, offset=183>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 183, 'line': 4, 'column': 30}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N50', status_description='warn: label does not exist. The label `Clause` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=26, offset=26>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 26, 'line': 2, 'column': 26}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `clause_ref` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=3, column=52, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 3, 'column': 52}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+ok
+test_no_similar_returns_empty (test_conflict_types.TestDetectConflictingDocuments) ... ok
+test_cross_doc_no_conflict (test_conflict_types.TestDetectConflictsInChunks) ... Received notification from DBMS server: <GqlStatusObject gql_status='01N50', status_description='warn: label does not exist. The label `Clause` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=70, offset=70>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 70, 'line': 2, 'column': 70}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `CONFLICTS_WITH` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=46, offset=46>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 46, 'line': 2, 'column': 46}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `id` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=34, offset=34>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 34, 'line': 2, 'column': 34}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `id` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=3, column=30, offset=107>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 107, 'line': 3, 'column': 30}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `text_ref` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=30, offset=183>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 183, 'line': 4, 'column': 30}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N50', status_description='warn: label does not exist. The label `Clause` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=26, offset=26>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 26, 'line': 2, 'column': 26}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `clause_ref` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=3, column=52, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 3, 'column': 52}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N50', status_description='warn: label does not exist. The label `Clause` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=70, offset=70>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 70, 'line': 2, 'column': 70}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `CONFLICTS_WITH` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=46, offset=46>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 46, 'line': 2, 'column': 46}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `id` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=34, offset=34>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 34, 'line': 2, 'column': 34}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `id` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=3, column=30, offset=107>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 107, 'line': 3, 'column': 30}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `text_ref` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=30, offset=183>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 183, 'line': 4, 'column': 30}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N50', status_description='warn: label does not exist. The label `Clause` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=26, offset=26>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 26, 'line': 2, 'column': 26}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `clause_ref` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=3, column=52, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 3, 'column': 52}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+ok
+test_version_conflict_detected (test_conflict_types.TestDetectConflictsInChunks) ... Received notification from DBMS server: <GqlStatusObject gql_status='01N50', status_description='warn: label does not exist. The label `Clause` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=70, offset=70>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 70, 'line': 2, 'column': 70}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `CONFLICTS_WITH` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=46, offset=46>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 46, 'line': 2, 'column': 46}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `id` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=34, offset=34>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 34, 'line': 2, 'column': 34}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `id` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=3, column=30, offset=107>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 107, 'line': 3, 'column': 30}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `text_ref` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=30, offset=183>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 183, 'line': 4, 'column': 30}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N50', status_description='warn: label does not exist. The label `Clause` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=26, offset=26>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 26, 'line': 2, 'column': 26}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `clause_ref` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=3, column=52, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 3, 'column': 52}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N50', status_description='warn: label does not exist. The label `Clause` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=70, offset=70>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 70, 'line': 2, 'column': 70}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N51', status_description='warn: relationship type does not exist. The relationship type `CONFLICTS_WITH` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=46, offset=46>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 46, 'line': 2, 'column': 46}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `id` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=34, offset=34>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 34, 'line': 2, 'column': 34}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `id` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=3, column=30, offset=107>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 107, 'line': 3, 'column': 30}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `text_ref` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=4, column=30, offset=183>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 183, 'line': 4, 'column': 30}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N50', status_description='warn: label does not exist. The label `Clause` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=2, column=26, offset=26>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 26, 'line': 2, 'column': 26}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+Received notification from DBMS server: <GqlStatusObject gql_status='01N52', status_description='warn: property key does not exist. The property `clause_ref` does not exist. Verify that the spelling is correct.', position=<SummaryInputPosition line=3, column=52, offset=129>, raw_classification='UNRECOGNIZED', classification=<NotificationClassification.UNRECOGNIZED: 'UNRECOGNIZED'>, raw_severity='WARNING', severity=<NotificationSeverity.WARNING: 'WARNING'>, diagnostic_record={'_classification': 'UNRECOGNIZED', '_severity': 'WARNING', '_position': {'offset': 129, 'line': 3, 'column': 52}, 'OPERATION': '', 'OPERATION_CODE': '0', 'CURRENT_SCHEMA': '/'}> for query: '\n                MATCH (c:Clause {id: $id})-[:CONFLICTS_WITH]->(other:Clause)\n                RETURN other.id AS other_id, other.clause_ref AS other_ref,\n                       other.text_ref AS other_text\n            '
+ok
+test_deduplicates (test_conflict_types.TestExpandChunksForConflicts) ... ok
+test_empty_input (test_conflict_types.TestExpandChunksForConflicts) ... ok
+test_expands_with_similar (test_conflict_types.TestExpandChunksForConflicts) ... ok
+test_no_similar_returns_original (test_conflict_types.TestExpandChunksForConflicts) ... ok
+test_max_llm_calls_respected (test_conflict_types.TestLLMBudget) ... ok
+test_binary_yes_fallback (test_conflict_types.TestLLMStructuredOutput) ... ok
+test_llm_failure (test_conflict_types.TestLLMStructuredOutput) ... ok
+test_malformed_output (test_conflict_types.TestLLMStructuredOutput) ... ok
+test_prompt_preserves_clause_context (test_conflict_types.TestLLMStructuredOutput) ... ok
+test_structured_json_conflict (test_conflict_types.TestLLMStructuredOutput) ... ok
+test_structured_json_no_conflict (test_conflict_types.TestLLMStructuredOutput) ... ok
+test_neo4j_failure_returns_empty (test_conflict_types.TestNeo4jConflicts) ... ok
+test_different_refs (test_conflict_types.TestVersionConflicts) ... ok
+test_no_ref (test_conflict_types.TestVersionConflicts) ... ok
+test_same_ref_different_docs (test_conflict_types.TestVersionConflicts) ... ok
+test_same_ref_same_doc (test_conflict_types.TestVersionConflicts) ... ok
+test_conflict_answer (test_intent_routing.TestAnswerBuilders) ... ok
+test_empty_builders (test_intent_routing.TestAnswerBuilders) ... ok
+test_risk_answer (test_intent_routing.TestAnswerBuilders) ... ok
+test_inherits_prior_intent (test_intent_routing.TestBareFollowup) ... ok
+test_no_prior_defaults_keyword (test_intent_routing.TestBareFollowup) ... ok
+test_qualifier_detection (test_intent_routing.TestBareFollowup) ... ok
+test_approval (test_intent_routing.TestKeywordFallback) ... ok
+test_compliance (test_intent_routing.TestKeywordFallback) ... ok
+test_conflict (test_intent_routing.TestKeywordFallback) ... ok
+test_general (test_intent_routing.TestKeywordFallback) ... ok
+test_procedure (test_intent_routing.TestKeywordFallback) ... ok
+test_comma_format (test_intent_routing.TestLLMFormats) ... ok
+test_keyword_value_format (test_intent_routing.TestLLMFormats) ... ok
+test_medium_maps_to_0_7 (test_intent_routing.TestLLMFormats) ... ok
+
+----------------------------------------------------------------------
+Ran 56 tests in 498.587s
+
+OK (skipped=2)
+BASELINE_EXIT_CODE=0

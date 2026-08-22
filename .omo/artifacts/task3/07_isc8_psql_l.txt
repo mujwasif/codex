@@ -1,0 +1,20 @@
+=== ISC-8: psql \l (databases) ===
+                                                           List of databases
+   Name    |    Owner    | Encoding | Locale Provider |  Collate   |   Ctype    | ICU Locale | ICU Rules |      Access privileges      
+-----------+-------------+----------+-----------------+------------+------------+------------+-----------+-----------------------------
+ codex_db  | codex_admin | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | 
+ postgres  | codex_admin | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | 
+ template0 | codex_admin | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | =c/codex_admin             +
+           |             |          |                 |            |            |            |           | codex_admin=CTc/codex_admin
+ template1 | codex_admin | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | =c/codex_admin             +
+           |             |          |                 |            |            |            |           | codex_admin=CTc/codex_admin
+(4 rows)
+
+=== bonus: pgvector extension ===
+ vector
+
+=== bonus: seeded users ===
+ admin    |            3
+ employee |            1
+ manager  |            2
+
