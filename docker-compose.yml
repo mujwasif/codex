@@ -82,6 +82,7 @@ services:
     build: .
     env_file: .env
     environment:
+      CODEX_API_URL: http://api:8000
       DATABASE_URL: postgresql://${POSTGRES_USER:-codex_admin}:${POSTGRES_PASSWORD:-change-this-password}@postgres:5432/${POSTGRES_DB:-codex_db}
       NEO4J_URI: bolt://neo4j:7687
       API_HOST: 0.0.0.0

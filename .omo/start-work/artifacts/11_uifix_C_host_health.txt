@@ -1,0 +1,2 @@
+=== Verification C: host-side API health ===
+{"status":"healthy","database":"healthy","llama_server":"healthy","qwen_server":"configured","neo4j":"healthy","version":"0.1.0"}

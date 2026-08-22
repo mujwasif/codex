@@ -1,0 +1,10 @@
+=== Verification A: CODEX_API_URL inside ui container ===
+http://api:8000
+
+=== docker compose ps (all 5 healthy) ===
+[compose] 5 services:
+  codex-main-api-1 (codex-main-api) Up 12 minutes (healthy) [8000, 8000,  8501/tcp]
+  codex-main-neo4j-1 (neo4j:5.26) Up 13 minutes (healthy) [7474, 7474, … +3]
+  codex-main-postgres-1 (codex-main-postgres) Up 13 minutes (healthy) [5432, 5432]
+  codex-main-ui-1 (codex-main-ui) Up 31 seconds (healthy) [8000/tcp, 8501, 8501]
+  codex-main-worker-1 (codex-main-worker) Up 12 minutes (healthy) [8000/tcp,  8501/tcp]

@@ -1,0 +1,2 @@
+=== Verification B: login via http://api:8000 from inside ui container ===
+bearer
