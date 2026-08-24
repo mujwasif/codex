@@ -21,16 +21,17 @@ STRICT RULES:
 
 
 def generate_grounded_answer(query, context_chunks, feedback_guidance=""):
-    """
+    \"\"\"
     Generate a grounded answer from retrieved clauses.
     
     Args:
         query: User's question
         context_chunks: List of chunk dicts with 'title', 'clause_ref', 'text'
+        feedback_guidance: Optional quality guidance
         
     Returns:
         Answer string with bracketed citations
-    """
+    \"\"\"
     # Format the retrieved chunks into a readable block for the LLM
     context_text = "\n\n".join([
         f"[Doc: {c['title']}, Clause: {c.get('clause_ref', 'N/A')}]: {c['text']}"
@@ -41,6 +42,12 @@ def generate_grounded_answer(query, context_chunks, feedback_guidance=""):
         f"\n\nQuality guidance from aggregate user ratings (not policy evidence):\n{feedback_guidance}"
         if feedback_guidance else ""
     )
+    
+    # Add structured procedural results if present (handled by orchestrator)
+    # Note: Since generate_grounded_answer is a standalone function, 
+    # we allow the caller to pass in structured data via the query or context_text if needed.
+    # However, to maintain signature, we assume the orchestrator integrates it into user_message.
+    
     user_message = f"Context:\n{context_text}{guidance_text}\n\nQuestion: {query}"
 
     result = llm_generate(
@@ -56,3 +63,4 @@ def generate_grounded_answer(query, context_chunks, feedback_guidance=""):
         return result.data
     else:
         return f"Error connecting to hosted LLM API: {result.error}"
+

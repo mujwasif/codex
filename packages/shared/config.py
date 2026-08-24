@@ -2,11 +2,15 @@
 Centralized configuration — single source of truth.
 
 Reads from environment variables with sensible defaults for local development.
+Auto-loads .env file from project root on import.
 """
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
 
 
 def _path_env(name: str, default: Path) -> str:

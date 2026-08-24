@@ -29,6 +29,7 @@ from sqlalchemy import text
 from packages.shared.db import get_db_session, init_db
 from packages.shared.models import Document, Chunk
 from packages.shared.access_control import infer_access_level
+from packages.shared.doc_parser import parse_document_structure
 from services.ingestion.structure_chunker import chunk_document_clauses, get_chunk_stats
 from packages.shared.config import (
     CODEX_API_URL,
@@ -47,11 +48,7 @@ from packages.shared.config import (
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(os.path.join(LOG_DIR, "ingestion_agent.log")),
-    ],
+    format="%(asctime)s [%(levelname)s] %(message)s",
 )
 logger = logging.getLogger("ingestion_agent")
 
@@ -87,11 +84,14 @@ def _pid_is_worker(pid: int) -> bool:
 def _acquire_singleton_lock() -> bool:
     """Claim the worker lockfile atomically. Returns False if another worker runs."""
     try:
-        fd = os.open(WORKER_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        # Use a persistent project path instead of /tmp to ensure UI can find it
+        lock_path = os.path.join(LOG_DIR, "ingestion_worker.pid")
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
         stale = True
         try:
-            with open(WORKER_LOCK_PATH, "r") as f:
+            lock_path = os.path.join(LOG_DIR, "ingestion_worker.pid")
+            with open(lock_path, "r") as f:
                 existing = f.read().strip()
             if existing.isdigit() and _pid_is_worker(int(existing)):
                 logger.info(
@@ -101,11 +101,13 @@ def _acquire_singleton_lock() -> bool:
         except Exception:
             pass
         try:
-            os.remove(WORKER_LOCK_PATH)
+            lock_path = os.path.join(LOG_DIR, "ingestion_worker.pid")
+            os.remove(lock_path)
         except FileNotFoundError:
             pass
         try:
-            fd = os.open(WORKER_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            lock_path = os.path.join(LOG_DIR, "ingestion_worker.pid")
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
             logger.info("Another ingestion worker is already running; exiting.")
             return False
@@ -178,37 +180,37 @@ def _mark_failed(doc_id: str, error: str):
             session.commit()
 
 
-def process_document(doc_id: str, model: SentenceTransformer):
+def process_chunking_stage(doc_id: str, model: SentenceTransformer, idx: int, total: int) -> bool:
+    """
+    Phase 1: Parse and Chunk a document.
+    """
     with get_db_session() as session:
         row = session.execute(
             text("SELECT title, source_uri FROM documents WHERE id = :id"),
             {"id": doc_id},
         ).fetchone()
         if not row:
-            logger.warning(
-                f"Document {doc_id} not found (likely cancelled before processing)"
-            )
-            return
+            return False
         filename = row.title
         file_path = row.source_uri
 
-    logger.info(f"Processing: {filename}")
+    print(f"  [{idx}/{total}] Chunking: {filename}")
+    logger.info(f"Chunking [{idx}/{total}]: {filename}")
 
     sections = parse_document_structure(file_path)
     if not sections:
-        logger.warning(f"No content found in {filename}, skipping.")
+        print(f"    -> Failed: no content found")
         _mark_failed(doc_id, f"No content found in {filename}")
-        return
+        return False
 
     full_text = "\n".join([s.get("content", "") for s in sections])
     if not full_text.strip():
-        logger.warning(f"No text content in {filename}, skipping.")
+        print(f"    -> Failed: no text content")
         _mark_failed(doc_id, "No text content in document")
-        return
+        return False
 
     access_tags = ["internal"]
     access_level = infer_access_level(filename, access_tags, full_text)
-    logger.info(f"  Inferred access_level={access_level} for {filename}")
 
     try:
         chunks = chunk_document_clauses(
@@ -220,16 +222,11 @@ def process_document(doc_id: str, model: SentenceTransformer):
         )
 
         stats = get_chunk_stats(chunks)
-        logger.info(
-            f"  Created {stats['total_chunks']} chunks from {stats['unique_sections']} sections"
-        )
 
         with get_db_session() as session:
             doc = session.query(Document).filter(Document.id == doc_id).first()
             if not doc:
-                raise RuntimeError(
-                    f"Document {doc_id} not found in DB (cancelled mid-flight)"
-                )
+                return False
 
             for chunk_data in chunks:
                 chunk_id = str(uuid.uuid4())
@@ -242,9 +239,7 @@ def process_document(doc_id: str, model: SentenceTransformer):
                     clause_ref=chunk_data["clause_ref"],
                     page=chunk_data.get("page"),
                     text=chunk_data["text"],
-                    embedding=embedding.tolist()
-                    if hasattr(embedding, "tolist")
-                    else embedding,
+                    embedding=embedding.tolist() if hasattr(embedding, "tolist") else embedding,
                     token_count=chunk_data["token_count"],
                     version="v1",
                     access_level=access_level,
@@ -257,31 +252,34 @@ def process_document(doc_id: str, model: SentenceTransformer):
             doc.last_error = None
             session.commit()
 
-        logger.info(f"  Stored {stats['total_chunks']} chunks in PostgreSQL")
+        print(
+            f"    -> {stats['total_chunks']} clause-level chunks "
+            f"from {stats['unique_sections']} sections"
+        )
+        return True
 
     except Exception as e:
-        logger.error(f"  Ingestion failed for {filename}: {e}")
+        print(f"    -> Failed: {e}")
+        logger.error(f"Chunking failed for {filename}: {e}")
         _mark_failed(doc_id, str(e)[:500])
-        return
+        return False
 
-    try:
-        from packages.shared.auth import create_access_token
-        import requests as http_req
+def process_graph_stage(doc_id: str, idx: int, total: int) -> bool:
+    """
+    Phase 2: Generate Knowledge Graph for a previously chunked document.
+    """
+    with get_db_session() as session:
+        row = session.execute(
+            text("SELECT title FROM documents WHERE id = :id"),
+            {"id": doc_id},
+        ).fetchone()
+        if not row:
+            return False
+        filename = row.title
 
-        admin_token = create_access_token(
-            {"username": "admin", "sub": "admin", "access_level": 3}
-        )
-        resp = http_req.post(
-            f"{CODEX_API_URL.rstrip('/')}/admin/refresh-index",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=10,
-        )
-        if resp.ok:
-            logger.info("  BM25 index refreshed")
-        else:
-            logger.warning(f"  BM25 refresh returned {resp.status_code}")
-    except Exception as e:
-        logger.warning(f"  BM25 refresh failed (FastAPI may be offline): {e}")
+    db_chunk_count = len(_get_chunks_for_document(doc_id))
+    print(f"  [{idx}/{total}] Processing: {filename} ({db_chunk_count} chunks)")
+    logger.info(f"Graphing [{idx}/{total}]: {filename}")
 
     try:
         from services.ingestion.llm_graph_generator import (
@@ -295,11 +293,6 @@ def process_document(doc_id: str, model: SentenceTransformer):
                 doc.ingestion_status = "graph_building"
                 session.commit()
 
-        db_chunks = _get_chunks_for_document(doc_id)
-        logger.info(
-            f"  Generating graph for {len(db_chunks)} chunks (batch size {GRAPH_BATCH_SIZE})..."
-        )
-
         formatted_chunks = [
             {
                 "chunk_id": str(c["id"]),
@@ -307,8 +300,12 @@ def process_document(doc_id: str, model: SentenceTransformer):
                 "section_path": c["section_path"],
                 "clause_ref": c["clause_ref"],
             }
-            for c in db_chunks
+            for c in _get_chunks_for_document(doc_id)
         ]
+
+        with get_db_session() as session:
+            doc = session.query(Document).filter(Document.id == doc_id).first()
+            access_level = int(doc.access_level) if doc and doc.access_level is not None else 1
 
         graph = generate_graph_for_document(
             doc_id=doc_id,
@@ -320,16 +317,13 @@ def process_document(doc_id: str, model: SentenceTransformer):
             access_level=access_level,
         )
 
-        if graph:
-            if not _doc_exists(doc_id):
-                logger.info(f"  {filename} cancelled mid-flight — graph skipped")
-                return
+        node_count = len(graph.get("nodes", [])) if graph else 0
+        edge_count = len(graph.get("edges", [])) if graph else 0
+
+        if graph and (graph.get("nodes") or graph.get("edges")):
             driver = _get_neo4j_driver()
             execute_graph_in_neo4j(graph, driver)
             driver.close()
-            logger.info(
-                f"  Graph complete: {len(graph.get('nodes', []))} nodes, {len(graph.get('edges', []))} edges"
-            )
 
         with get_db_session() as session:
             doc = session.query(Document).filter(Document.id == doc_id).first()
@@ -339,95 +333,87 @@ def process_document(doc_id: str, model: SentenceTransformer):
                 doc.graph_ready_at = datetime.utcnow()
                 doc.last_error = None
                 session.commit()
-        logger.info(f"  {filename} registered as READY (chunks + graph)")
+
+        print(f"    -> {node_count} nodes, {edge_count} edges")
+        return True
     except Exception as e:
-        logger.warning(f"  Graph generation failed (Neo4j may be offline): {e}")
-        try:
-            with get_db_session() as session:
-                doc = session.query(Document).filter(Document.id == doc_id).first()
-                if doc:
-                    doc.ingestion_status = "failed"
-                    doc.last_error = str(e)[:500]
-                    session.commit()
-        except Exception:
-            pass
-        # Defensive cleanup: remove any partially-written graph nodes for this doc.
-        try:
-            driver = _get_neo4j_driver()
-            with driver.session() as session:
-                with session.begin_transaction() as tx:
-                    tx.run(
-                        "MATCH (p:Policy {id: $doc_id}) DETACH DELETE p", doc_id=doc_id
-                    )
-                    chunk_ids = [str(c["id"]) for c in _get_chunks_for_document(doc_id)]
-                    if chunk_ids:
-                        tx.run(
-                            "MATCH (c:Clause) WHERE c.id IN $chunk_ids DETACH DELETE c",
-                            chunk_ids=chunk_ids,
-                        )
-            driver.close()
-            logger.info("  Cleaned partial Neo4j graph for failed document")
-        except Exception:
-            pass
-
-    logger.info(f"Done: {filename}")
-
-
-def _claim_pending() -> Optional[str]:
-    """Atomically claim the oldest pending document, or None if none exists."""
-    with get_db_session() as session:
-        row = session.execute(
-            text(
-                "SELECT id FROM documents WHERE ingestion_status = 'pending' ORDER BY created_at LIMIT 1"
-            )
-        ).fetchone()
-        if not row:
-            return None
-        doc_id = str(row.id)
-        result = session.execute(
-            text("""
-                UPDATE documents
-                SET ingestion_status = 'processing', status = 'processing', last_error = NULL
-                WHERE id = :id AND ingestion_status = 'pending'
-            """),
-            {"id": doc_id},
-        )
-        session.commit()
-        if result.rowcount != 1:
-            return None
-        return doc_id
-
+        print(f"    -> Failed: {e}")
+        logger.warning(f"Graph generation failed for {filename}: {e}")
+        _mark_failed(doc_id, str(e)[:500])
+        return False
 
 def run_worker():
-    logger.info("=" * 50)
-    logger.info("Codex Ingestion Worker starting")
-    logger.info("  LLM: hosted API (%s)", LLM_BASE_URL)
-    logger.info(f"  Neo4j: {NEO4J_URI}")
-    logger.info(
-        "  Mode: explicit queue — processes ONLY documents uploaded through the admin UI"
-    )
-    logger.info("=" * 50)
+    logger.info("=" * 40)
+    logger.info("Codex Staged Ingestion Worker starting")
+    logger.info("=" * 40)
 
     if not _acquire_singleton_lock():
         logger.info("Exiting: another ingestion worker holds the singleton lock.")
         return
 
     init_db()
-
     logger.info("Loading embedding model...")
     model = SentenceTransformer(MODEL_NAME, device="cpu")
     logger.info("Embedding model loaded.")
 
     while _run_worker:
-        doc_id = _claim_pending()
-        if doc_id is None:
-            time.sleep(CLAIM_INTERVAL)
-            continue
-        try:
-            process_document(doc_id, model)
-        except Exception as e:
-            logger.error(f"Unexpected error processing {doc_id}: {e}")
-            _mark_failed(doc_id, str(e)[:500])
+        # STAGE 1: Chunking Wave
+        pending_docs = []
+        with get_db_session() as session:
+            rows = session.execute(
+                text("SELECT id FROM documents WHERE ingestion_status = 'pending' ORDER BY created_at")
+            ).fetchall()
+            pending_docs = [str(r[0]) for r in rows]
+
+        if pending_docs:
+            total = len(pending_docs)
+            print("\n" + "=" * 40)
+            print(f" STAGE 1: CHUNKING ({total} documents)")
+            print("=" * 40)
+            processed = 0
+            for i, doc_id in enumerate(pending_docs, 1):
+                if process_chunking_stage(doc_id, model, i, total):
+                    processed += 1
+
+            # Refresh BM25 index once after the whole wave is done
+            try:
+                from packages.shared.auth import create_access_token
+                import requests as http_req
+                admin_token = create_access_token({"username": "admin", "sub": "admin", "access_level": 3})
+                resp = http_req.post(
+                    f"{CODEX_API_URL.rstrip('/')}/admin/refresh-index",
+                    headers={"Authorization": f"Bearer {admin_token}"},
+                    timeout=10,
+                )
+                if resp.ok:
+                    print("BM25 index refreshed.")
+                else:
+                    logger.warning(f"Batch index refresh returned {resp.status_code}")
+            except Exception as e:
+                logger.warning(f"Batch index refresh failed: {e}")
+
+            print(f"\nChunking done: {processed} processed, {total - processed} failed out of {total}")
+
+        # STAGE 2: Graph Wave
+        ready_for_graph = []
+        with get_db_session() as session:
+            rows = session.execute(
+                text("SELECT id FROM documents WHERE ingestion_status = 'chunks_ready' ORDER BY created_at")
+            ).fetchall()
+            ready_for_graph = [str(r[0]) for r in rows]
+
+        if ready_for_graph:
+            total = len(ready_for_graph)
+            print("\n" + "=" * 40)
+            print(" STAGE 2: KNOWLEDGE GRAPH (%d documents)" % total)
+            print("=" * 40)
+            processed = 0
+            for i, doc_id in enumerate(ready_for_graph, 1):
+                if process_graph_stage(doc_id, i, total):
+                    processed += 1
+            print(f"\nGraph done: {processed} processed, {total - processed} skipped out of {total}")
+
+        time.sleep(CLAIM_INTERVAL)
 
     logger.info("Ingestion worker stopped.")
     _release_singleton_lock()

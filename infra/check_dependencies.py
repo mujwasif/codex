@@ -25,6 +25,7 @@ IMPORT_NAMES = {
     "psycopg2-binary": "psycopg2",
     "scikit-learn": "sklearn",
     "argon2-cffi": "argon2",
+    "python-dotenv": "dotenv",
 }
 
 

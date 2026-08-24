@@ -15,6 +15,7 @@ import enum
 import time
 import uuid
 import re
+import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from services.agents.tools.llm_tools import llm_generate, QWEN3_8B_MODEL
@@ -64,9 +65,11 @@ class QueryContext:
     conflicts: List[Dict[str, Any]] = field(default_factory=list)
     conflict_analysis: Dict[str, Any] = field(default_factory=dict)
     risk_result: Optional[Dict[str, Any]] = None
+    procedure_results: Optional[Dict[str, Any]] = None
 
     # Agent chain trace (recorded by run_pipeline)
     chain: List[Dict[str, Any]] = field(default_factory=list)
+
 
     error: Optional[str] = None
     start_time: float = 0.0
@@ -374,8 +377,31 @@ def _keyword_classify(question: str) -> tuple[QueryIntent, float]:
     return QueryIntent.GENERAL, 0.5
 
 
-# Relative/connector words that mark a bare follow-up ("for X?", "and the Y one?",
-# "what about Z?") — these carry no intent signal on their own.
+def agent_procedure_reason(ctx: QueryContext):
+    """
+    Dedicated reasoning for procedural queries.
+    Bypasses the general reasoner to produce a structured workflow.
+    """
+    from services.agents.procedure_agent import ProcedureAgent
+    
+    if ctx.intent != QueryIntent.PROCEDURE:
+        return
+        
+    try:
+        proc_agent = ProcedureAgent()
+        workflow = proc_agent.process(ctx.question, ctx.chunks)
+        
+        if workflow:
+            ctx.answer = workflow
+            ctx.state = QueryState.REASONED
+        else:
+            # Fallback: if the dedicated agent can't form a workflow, 
+            # we mark it as RETRIEVED so the general agent_reason can try.
+            ctx.state = QueryState.RETRIEVED
+    except Exception as e:
+        logger.error(f"Procedure reasoning failed: {e}")
+        ctx.state = QueryState.RETRIEVED
+
 _FOLLOWUP_START = (
     "for ", "and ", "and for ", "what about ", "how about ", "regarding ",
     "what about the ", "and the ", "and what about ", "about the ", "for the ",
@@ -532,12 +558,16 @@ def agent_retrieve(ctx: QueryContext):
     if _is_bare_followup(query):
         query = ctx.question
 
+    # Increase retrieval depth for procedures to capture all requirements
+    top_k = 100 if ctx.intent == QueryIntent.PROCEDURE else 20
+
     try:
         ctx.chunks = search_policy(
             query,
             access_level=ctx.access_level,
             search_mode=ctx.search_mode,
             bm25_index=get_bm25_index(),
+            top_k_retrieval=top_k,
         )
         ctx.state = QueryState.RETRIEVED
     except Exception as e:
@@ -586,6 +616,15 @@ def agent_reason(ctx: QueryContext):
                 ctx.state = QueryState.REASONED
                 return
 
+        # Handle procedural results: enrich the question to force detailed listing
+        final_query = ctx.question
+        if ctx.intent == QueryIntent.PROCEDURE and ctx.procedure_results:
+            proc_data = ctx.procedure_results.get("processes", [])
+            if proc_data:
+                process_list = "\n".join([f"- {p['name']}" for p in proc_data])
+                final_query += f"\n\nSTRUCTURED DATA FOUND:\n{process_list}\n"
+                final_query += "Please provide a detailed, long explanation of all these processes, including every mandatory requirement and every sequential step, with citations."
+
         if not ctx.chunks:
             ctx.fail("No relevant policy clauses found")
             return
@@ -593,11 +632,12 @@ def agent_reason(ctx: QueryContext):
         from services.api.search import get_global_feedback_guidance
         feedback_guidance = get_global_feedback_guidance(ctx.intent.value)
         ctx.answer = generate_grounded_answer(
-            ctx.question, ctx.chunks, feedback_guidance=feedback_guidance
+            final_query, ctx.chunks, feedback_guidance=feedback_guidance
         )
         ctx.state = QueryState.REASONED
     except Exception as e:
         ctx.fail(f"Reasoning failed: {e}")
+
 
 
 def agent_verify(ctx: QueryContext):
@@ -724,7 +764,7 @@ INTENT_PIPELINES = {
     QueryIntent.APPROVAL: [agent_retrieve, agent_approval, agent_reason, agent_verify],
     QueryIntent.CONFLICT: [agent_retrieve, agent_conflict_check, agent_reason, agent_verify],
     QueryIntent.COMPLIANCE: [agent_retrieve, agent_risk_compliance, agent_reason, agent_verify],
-    QueryIntent.PROCEDURE: [agent_retrieve, agent_reason, agent_verify],
+    QueryIntent.PROCEDURE: [agent_retrieve, agent_procedure_reason, agent_verify],
     QueryIntent.GENERAL: DEFAULT_PIPELINE,
 }
 

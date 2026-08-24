@@ -276,17 +276,6 @@ def ingestion_status(
     from sqlalchemy import text as sa_text
 
     try:
-        worker = False
-        try:
-            result = subprocess.run(
-                ["pgrep", "-f", "services.ingestion.ingestion_agent"],
-                capture_output=True,
-                text=True,
-            )
-            worker = result.returncode == 0
-        except Exception:
-            worker = False
-
         with get_db_session() as session:
             counts = {}
             for row in session.execute(
@@ -309,7 +298,7 @@ def ingestion_status(
                 FROM documents d
                 ORDER BY d.updated_at DESC
                 LIMIT 100
-            """)
+                """)
             ).fetchall()
 
         log_tail = ""
@@ -319,12 +308,11 @@ def ingestion_status(
             log_path = os.path.join(LOG_DIR, "ingestion_agent.log")
             with open(log_path, "r", errors="ignore") as f:
                 lines = f.readlines()
-                log_tail = "".join(lines[-40:])
+                log_tail = "".join(lines[-60:])
         except Exception:
             log_tail = ""
 
         return {
-            "worker_alive": worker,
             "counts": counts,
             "documents": [
                 {
@@ -384,6 +372,161 @@ def _delete_document_from_neo4j(doc_id: str, chunk_ids) -> dict:
     except Exception as e:
         print(f"⚠️ Neo4j cleanup failed for {doc_id}: {e}")
     return graph_summary
+
+
+def _retry_failed_docs(session, mode):
+    """Core retry logic. mode='chunks' = no chunks yet, mode='graph' = chunks exist but graph failed."""
+    from sqlalchemy import text as sa_text
+
+    rows = session.execute(
+        sa_text("SELECT id, title FROM documents WHERE ingestion_status = 'failed' ORDER BY created_at")
+    ).fetchall()
+
+    retried = []
+    for row in rows:
+        doc_id = str(row.id)
+
+        chunk_count = session.execute(
+            sa_text("SELECT COUNT(*) FROM chunks WHERE document_id = :id"),
+            {"id": doc_id},
+        ).scalar()
+
+        has_chunks = chunk_count > 0
+
+        if mode == "chunks" and has_chunks:
+            continue
+        if mode == "graph" and not has_chunks:
+            continue
+
+        new_status = "chunks_ready" if has_chunks else "pending"
+
+        session.execute(
+            sa_text(
+                "UPDATE documents SET ingestion_status = :status, last_error = NULL, status = 'processing' WHERE id = :id"
+            ),
+            {"status": new_status, "id": doc_id},
+        )
+
+        retried.append({
+            "document_id": doc_id,
+            "title": row.title,
+            "reset_to": new_status,
+            "chunks_kept": chunk_count,
+        })
+
+    return retried
+
+
+@router.post("/v1/ingestion/retry-chunks")
+async def retry_chunking_failures(
+    current_user: dict = Depends(require_admin),
+):
+    """Retry all failed documents that have no chunks (chunking stage failed)."""
+    from sqlalchemy import text as sa_text
+
+    with get_db_session() as session:
+        retried = _retry_failed_docs(session, mode="chunks")
+        if not retried:
+            return {"status": "nothing_to_retry", "retried": 0, "mode": "chunks", "documents": []}
+        session.commit()
+
+    log_audit_action(
+        current_user.get("username", "admin"),
+        "retry_chunks",
+        {"count": len(retried)},
+    )
+
+    return {
+        "status": "retrying",
+        "retried": len(retried),
+        "mode": "chunks",
+        "documents": retried,
+    }
+
+
+@router.post("/v1/ingestion/retry-graph")
+async def retry_graph_failures(
+    current_user: dict = Depends(require_admin),
+):
+    """Retry all failed documents that have chunks but graph generation failed."""
+    from sqlalchemy import text as sa_text
+
+    with get_db_session() as session:
+        retried = _retry_failed_docs(session, mode="graph")
+        if not retried:
+            return {"status": "nothing_to_retry", "retried": 0, "mode": "graph", "documents": []}
+        session.commit()
+
+    log_audit_action(
+        current_user.get("username", "admin"),
+        "retry_graph",
+        {"count": len(retried)},
+    )
+
+    return {
+        "status": "retrying",
+        "retried": len(retried),
+        "mode": "graph",
+        "documents": retried,
+    }
+
+
+@router.post("/v1/ingestion/retry/{document_id}")
+async def retry_document(
+    document_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    """Reset a failed document for retry. Smart restart based on failure point."""
+    from sqlalchemy import text as sa_text
+
+    with get_db_session() as session:
+        row = session.execute(
+            sa_text("SELECT id, title, ingestion_status, last_error FROM documents WHERE id = :id"),
+            {"id": document_id},
+        ).fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+        if row.ingestion_status != "failed":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document is '{row.ingestion_status}', not 'failed'. Only failed documents can be retried.",
+            )
+
+        chunk_count = session.execute(
+            sa_text("SELECT COUNT(*) FROM chunks WHERE document_id = :id"),
+            {"id": document_id},
+        ).scalar()
+
+        if chunk_count > 0:
+            new_status = "chunks_ready"
+            reason = f"Retrying graph stage ({chunk_count} chunks already exist)"
+        else:
+            new_status = "pending"
+            reason = "Retrying full pipeline (no chunks yet)"
+
+        session.execute(
+            sa_text(
+                "UPDATE documents SET ingestion_status = :status, last_error = NULL, status = 'processing' WHERE id = :id"
+            ),
+            {"status": new_status, "id": document_id},
+        )
+        session.commit()
+
+    log_audit_action(
+        current_user.get("username", "admin"),
+        "document_retry",
+        {"document_id": document_id, "title": row.title, "reset_to": new_status},
+    )
+
+    return {
+        "status": "retrying",
+        "document_id": document_id,
+        "title": row.title,
+        "reset_to": new_status,
+        "reason": reason,
+    }
 
 
 @router.delete("/v1/documents/{document_id}")

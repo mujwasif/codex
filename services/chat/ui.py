@@ -2,6 +2,7 @@ import base64
 import html
 import json
 import os
+from datetime import datetime
 
 import requests
 import streamlit as st
@@ -74,6 +75,87 @@ def delete_policy(token, document_id):
         return response.json()
     except requests.exceptions.RequestException as e:
         st.error(f"Delete failed: {e}")
+        return None
+
+
+def retry_policy(token, document_id):
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/v1/ingestion/retry/{document_id}",
+            headers=headers,
+            timeout=30,
+        )
+        if response.status_code == 403:
+            st.error("Admin access required to retry documents.")
+            return None
+        if response.status_code == 404:
+            st.error("Document not found.")
+            return None
+        if response.status_code == 400:
+            st.warning(response.json().get("detail", "Cannot retry this document."))
+            return None
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Retry failed: {e}")
+        return None
+
+
+def retry_chunks_policy(token):
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/v1/ingestion/retry-chunks",
+            headers=headers,
+            timeout=30,
+        )
+        if response.status_code == 403:
+            st.error("Admin access required to retry documents.")
+            return None
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Retry chunking failed: {e}")
+        return None
+
+
+def retry_graph_policy(token):
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/v1/ingestion/retry-graph",
+            headers=headers,
+            timeout=30,
+        )
+        if response.status_code == 403:
+            st.error("Admin access required to retry documents.")
+            return None
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Retry graph failed: {e}")
+        return None
+
+
+def remove_policy(token, document_id):
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = requests.delete(
+            f"{API_BASE_URL}/v1/documents/{document_id}",
+            headers=headers,
+            timeout=60,
+        )
+        if response.status_code == 403:
+            st.error("Admin access required to remove documents.")
+            return None
+        if response.status_code == 404:
+            st.error("Document not found (may already be removed).")
+            return None
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Remove failed: {e}")
         return None
 
 
@@ -183,16 +265,29 @@ def fetch_document_detail(token, doc_id):
 INGESTION_STAGES = ["pending", "processing", "chunks_ready", "graph_building", "ready", "failed"]
 
 
+@st.fragment(run_every=5)
+def render_live_ingestion_feed(token):
+    """Terminal-style live feed of the ingestion worker output. Auto-refreshes every 5s."""
+    data = fetch_ingestion_status(token)
+    tail = (data.get("log_tail") or "").strip() if data else ""
+    st.caption(
+        f"Live feed - auto-refreshes every 5s. Last updated {datetime.now().strftime('%H:%M:%S')}"
+    )
+    if tail:
+        with st.container(height=200):
+            st.code(tail[-2000:], language="log")
+    else:
+        st.info("No ingestion activity yet.")
+
+
 def render_ingestion_status_panel(status_data, token):
     if not status_data:
         return
-    worker = status_data.get("worker_alive", False)
     counts = status_data.get("counts") or {}
 
-    w_label = "UP" if worker else "DOWN"
-    tone = "verdict-clear" if worker else "verdict-abstained"
+    render_live_ingestion_feed(token)
+
     st.markdown(
-        f'<span class="verdict-box {tone}">INGESTION WORKER: {w_label}</span>'
         '<span class="metric-text">documents become ready only after chunking AND graph; '
         'ingestion runs only for files uploaded here</span>',
         unsafe_allow_html=True,
@@ -208,8 +303,11 @@ def render_ingestion_status_panel(status_data, token):
         rows = []
         for d in docs:
             stage = d.get("ingestion_status", "unknown")
-            tone = "verdict-clear" if stage == "ready" else "verdict-abstained" if stage == "failed" \
+            tone = (
+                "verdict-clear" if stage == "ready"
+                else "verdict-abstained" if stage == "failed"
                 else "verdict-conditional"
+            )
             rows.append({
                 "Title": d.get("title"),
                 "Stage": f"<span class='verdict-box {tone}'>{stage}</span>",
@@ -229,12 +327,64 @@ def render_ingestion_status_panel(status_data, token):
             unsafe_allow_html=True,
         )
 
+    failed_docs = [d for d in (docs or []) if d.get("ingestion_status") == "failed"]
+    if failed_docs:
+        st.subheader(f"Failed Documents ({len(failed_docs)})")
+        st.caption("Remove deletes a single document and all its data permanently.")
+
+        chunk_failures = [d for d in failed_docs if not d.get("chunk_count")]
+        graph_failures = [d for d in failed_docs if d.get("chunk_count")]
+
+        rc1, rc2 = st.columns(2)
+        with rc1:
+            if chunk_failures:
+                if st.button(f"Retry Chunking ({len(chunk_failures)})", type="primary", use_container_width=True):
+                    with st.spinner("Retrying chunking for failed documents..."):
+                        result = retry_chunks_policy(token)
+                    if result and result.get("retried", 0) > 0:
+                        st.success(f"Retrying {result['retried']} document(s) for chunking.")
+                        st.rerun()
+                    else:
+                        st.info("Nothing to retry.")
+            else:
+                st.button("Retry Chunking (0)", disabled=True, use_container_width=True)
+        with rc2:
+            if graph_failures:
+                if st.button(f"Retry Graph ({len(graph_failures)})", type="primary", use_container_width=True):
+                    with st.spinner("Retrying graph generation for failed documents..."):
+                        result = retry_graph_policy(token)
+                    if result and result.get("retried", 0) > 0:
+                        st.success(f"Retrying {result['retried']} document(s) for graph.")
+                        st.rerun()
+                    else:
+                        st.info("Nothing to retry.")
+            else:
+                st.button("Retry Graph (0)", disabled=True, use_container_width=True)
+
+        for d in failed_docs:
+            doc_id = d.get("id")
+            title = d.get("title", "Unknown")
+            error = d.get("last_error", "No error message")
+            chunk_count = d.get("chunk_count", 0)
+            fail_type = "graph" if chunk_count else "chunking"
+            st.markdown(
+                f"**{html.escape(title)}** <span style='color:#856404;'>(failed at {fail_type})</span>"
+                f"<br><small style='color:#721c24;'>{html.escape(error[:200])}</small>",
+                unsafe_allow_html=True,
+            )
+            if st.button("Remove", key=f"remove_{doc_id}", use_container_width=False, type="secondary"):
+                with st.spinner(f"Removing {title} and all its data..."):
+                    result = remove_policy(token, doc_id)
+                if result:
+                    st.success(f"Removed '{result.get('title')}': {result.get('chunks_removed', 0)} chunks, graph cleaned.")
+                    st.rerun()
+            st.divider()
+
     if docs:
         st.subheader("Cancel / Remove Document")
         st.caption(
             "Permanently deletes the document record, its chunks/citations/entities in "
-            "PostgreSQL, its knowledge-graph nodes/edges in Neo4j, and the source file "
-            "in archive/. **In-flight documents (processing/chunks_ready/graph_building) "
+            "PostgreSQL, and the source file in archive/. **In-flight documents (processing/pending/chunks_ready/graph_building) "
             "are cancelled.** This cannot be undone."
         )
         options = {
@@ -260,10 +410,6 @@ def render_ingestion_status_panel(status_data, token):
                     )
                     st.rerun()
 
-    log_tail = (status_data.get("log_tail") or "").strip()
-    if log_tail:
-        with st.expander("Ingestion Agent Log (tail)"):
-            st.code(log_tail[-3000:], language="log")
 
 
 def render_ingestion_tab(token):
@@ -274,27 +420,48 @@ def render_ingestion_tab(token):
     )
 
     uploaded = st.file_uploader(
-        "Drag and drop a policy document (single file, .pdf or .docx)",
+        "Drag and drop policy documents (.pdf or .docx)",
         type=["pdf", "docx"],
-        accept_multiple_files=False,
+        accept_multiple_files=True,
         key="ingestion_file_uploader",
     )
 
     col_a, col_b = st.columns([1, 1])
     with col_a:
-        upload_clicked = st.button("Upload Policy", type="primary", use_container_width=True)
+        upload_clicked = st.button("Upload Policies", type="primary", use_container_width=True)
     with col_b:
         refresh_clicked = st.button("Refresh Status", use_container_width=True)
 
-    if uploaded is not None and upload_clicked:
-        if not uploaded.name.lower().endswith((".pdf", ".docx")):
-            st.error("Only .pdf and .docx files are supported.")
+    if uploaded and upload_clicked:
+        if isinstance(uploaded, list):
+            files_to_upload = uploaded
         else:
-            with st.spinner(f"Queuing {uploaded.name}..."):
-                result = upload_policy(token, uploaded)
+            files_to_upload = [uploaded]
+
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        success_count = 0
+        for idx, file in enumerate(files_to_upload):
+            if not file.name.lower().endswith((".pdf", ".docx")):
+                st.error(f"Skipping {file.name}: Only .pdf and .docx are supported.")
+                continue
+            
+            status_text.text(f"Queuing {idx+1}/{len(files_to_upload)}: {file.name}...")
+            result = upload_policy(token, file)
             if result:
-                st.success(f"Queued: {result.get('filename')}. Watch it become ready below.")
-                st.rerun()
+                success_count += 1
+            
+            progress_bar.progress((idx + 1) / len(files_to_upload))
+        
+        status_text.empty()
+        progress_bar.empty()
+        
+        if success_count > 0:
+            st.success(f"Successfully queued {success_count} of {len(files_to_upload)} documents.")
+            st.rerun()
+        else:
+            st.error("No documents were successfully queued.")
 
     if refresh_clicked:
         st.rerun()

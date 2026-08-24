@@ -6,6 +6,7 @@ from sqlalchemy import text
 from sentence_transformers import SentenceTransformer
 
 from packages.shared.db import get_db_session, init_db
+from packages.shared.doc_parser import parse_document_structure
 from packages.shared.models import Document as DocumentModel, Chunk
 from packages.shared.access_control import infer_access_level
 from services.ingestion.structure_chunker import chunk_document_clauses, get_chunk_stats

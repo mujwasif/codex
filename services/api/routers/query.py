@@ -40,7 +40,7 @@ def _load_user_history(session, user_id_or_name: str, limit: int = HISTORY_TURNS
 
     q_rows = (
         session.query(Query)
-        .filter(Query.user_id == user_uuid)
+        .filter(Query.user_id.in_([user_uuid, user_id_or_name]))
         .options(joinedload(Query.answers))
         .order_by(Query.created_at.desc())
         .limit(limit)
@@ -293,7 +293,7 @@ async def get_query_history(
 
             queries = (
                 session.query(Query)
-                .filter(Query.user_id == user_uuid)
+                .filter(Query.user_id.in_([user_uuid, username]))
                 .options(
                     joinedload(Query.answers)
                     .joinedload(Answer.citations)
@@ -353,17 +353,19 @@ async def clear_query_history(current_user: dict = Depends(get_current_active_us
 
     try:
         with get_db_session() as session:
-            # Authorize as the current user (defense against user_id spoofing)
+            user = session.query(User).filter(User.username == username).first()
+            user_uuid = str(user.id) if user else username
+
             summary["citations_deleted"] = session.execute(
                 sa_text("""
                     DELETE FROM citations
                     WHERE answer_id IN (
                         SELECT a.id FROM answers a
                         JOIN queries q ON q.id = a.query_id
-                        WHERE q.user_id = :uid
+                        WHERE q.user_id IN (:uid1, :uid2)
                     )
                 """),
-                {"uid": username},
+                {"uid1": username, "uid2": user_uuid},
             ).rowcount
             summary["feedback_deleted"] = session.execute(
                 sa_text("""
@@ -371,23 +373,23 @@ async def clear_query_history(current_user: dict = Depends(get_current_active_us
                     WHERE answer_id IN (
                         SELECT a.id FROM answers a
                         JOIN queries q ON q.id = a.query_id
-                        WHERE q.user_id = :uid
+                        WHERE q.user_id IN (:uid1, :uid2)
                     )
                 """),
-                {"uid": username},
+                {"uid1": username, "uid2": user_uuid},
             ).rowcount
             summary["answers_deleted"] = session.execute(
                 sa_text("""
                     DELETE FROM answers
                     WHERE query_id IN (
-                        SELECT id FROM queries WHERE user_id = :uid
+                        SELECT id FROM queries WHERE user_id IN (:uid1, :uid2)
                     )
                 """),
-                {"uid": username},
+                {"uid1": username, "uid2": user_uuid},
             ).rowcount
             summary["queries_deleted"] = session.execute(
-                sa_text("DELETE FROM queries WHERE user_id = :uid"),
-                {"uid": username},
+                sa_text("DELETE FROM queries WHERE user_id IN (:uid1, :uid2)"),
+                {"uid1": username, "uid2": user_uuid},
             ).rowcount
             session.commit()
     except Exception as e:
