@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from services.agents.tools.llm_tools import llm_generate, QWEN3_8B_MODEL
 
+logger = logging.getLogger(__name__)
+
 
 class QueryState(enum.Enum):
     IDLE = "idle"
@@ -350,6 +352,9 @@ def _keyword_classify(question: str) -> tuple[QueryIntent, float]:
     """Deterministic keyword heuristic. Returns (intent, confidence)."""
     q = question.lower()
 
+    conversational_kw = ("hello", "hi ", "hi!", "hey", "good morning", "good afternoon",
+                         "good evening", "thank you", "thanks", "bye", "goodbye",
+                         "how are you", "what's up", "see you")
     approval_kw = ("approv", "author", "sign-off", "sign off", "escalate", "who approves",
                    "who can", "who author", "who signs", "needs approval", "requires approval",
                    "approval matrix", "approval chain", "approval limit", "approval authority")
@@ -363,6 +368,9 @@ def _keyword_classify(question: str) -> tuple[QueryIntent, float]:
                     "how often", "when should", "what happens", "what do i", "process for",
                     "walk me through", "guide me", "instructions", "step by step")
 
+    for kw in conversational_kw:
+        if q.startswith(kw.rstrip()) or q == kw.rstrip() or kw in q:
+            return QueryIntent.CONVERSATIONAL, 0.9
     for kw in approval_kw:
         if kw in q:
             return QueryIntent.APPROVAL, 0.6
@@ -377,55 +385,6 @@ def _keyword_classify(question: str) -> tuple[QueryIntent, float]:
             return QueryIntent.PROCEDURE, 0.6
     return QueryIntent.GENERAL, 0.5
 
-
-def agent_conversational(ctx: QueryContext):
-    """Handle greetings, thanks, and casual conversation without retrieval."""
-    q = (ctx.raw_question or ctx.question).lower().strip().rstrip("?.!")
-    if q in ("hello", "hi", "hey", "hi there", "hey there"):
-        ctx.answer = "Hello! I'm Codex, your policy intelligence assistant. How can I help you today?"
-    elif "thank" in q:
-        ctx.answer = "You're welcome! Let me know if you have any other policy questions."
-    elif q in ("bye", "goodbye", "see you", "see ya"):
-        ctx.answer = "Goodbye! Feel free to come back anytime."
-    elif "good morning" in q:
-        ctx.answer = "Good morning! I'm Codex. What policy questions can I help you with?"
-    elif "good afternoon" in q:
-        ctx.answer = "Good afternoon! I'm Codex. What policy questions can I help you with?"
-    elif "good evening" in q:
-        ctx.answer = "Good evening! I'm Codex. What policy questions can I help you with?"
-    elif "how are you" in q:
-        ctx.answer = "I'm doing well, thank you! I'm here to help with any policy questions you might have."
-    else:
-        ctx.answer = "Hi there! I'm Codex, your policy intelligence assistant. How can I help you today?"
-    ctx.verdict = "clear"
-    ctx.confidence = 1.0
-    ctx.state = QueryState.REASONED
-
-
-def agent_procedure_reason(ctx: QueryContext):
-    """
-    Dedicated reasoning for procedural queries.
-    Bypasses the general reasoner to produce a structured workflow.
-    """
-    from services.agents.procedure_agent import ProcedureAgent
-    
-    if ctx.intent != QueryIntent.PROCEDURE:
-        return
-        
-    try:
-        proc_agent = ProcedureAgent()
-        workflow = proc_agent.process(ctx.question, ctx.chunks)
-        
-        if workflow:
-            ctx.answer = workflow
-            ctx.state = QueryState.REASONED
-        else:
-            # Fallback: if the dedicated agent can't form a workflow, 
-            # we mark it as RETRIEVED so the general agent_reason can try.
-            ctx.state = QueryState.RETRIEVED
-    except Exception as e:
-        logger.error(f"Procedure reasoning failed: {e}")
-        ctx.state = QueryState.RETRIEVED
 
 _FOLLOWUP_START = (
     "for ", "and ", "and for ", "what about ", "how about ", "regarding ",
@@ -784,6 +743,51 @@ def agent_risk_compliance(ctx: QueryContext):
         ctx.state = QueryState.REASONED
     except Exception as e:
         ctx.risk_result = {"error": str(e)}
+
+
+def agent_conversational(ctx: QueryContext):
+    """Handle greetings, thanks, and casual conversation without retrieval."""
+    q = (ctx.raw_question or ctx.question).lower().strip().rstrip("?.!")
+    if q in ("hello", "hi", "hey", "hi there", "hey there"):
+        ctx.answer = "Hello! I'm Codex, your policy intelligence assistant. How can I help you today?"
+    elif "thank" in q:
+        ctx.answer = "You're welcome! Let me know if you have any other policy questions."
+    elif q in ("bye", "goodbye", "see you", "see ya"):
+        ctx.answer = "Goodbye! Feel free to come back anytime."
+    elif "good morning" in q:
+        ctx.answer = "Good morning! I'm Codex. What policy questions can I help you with?"
+    elif "good afternoon" in q:
+        ctx.answer = "Good afternoon! I'm Codex. What policy questions can I help you with?"
+    elif "good evening" in q:
+        ctx.answer = "Good evening! I'm Codex. What policy questions can I help you with?"
+    elif "how are you" in q:
+        ctx.answer = "I'm doing well, thank you! I'm here to help with any policy questions you might have."
+    else:
+        ctx.answer = "Hi there! I'm Codex, your policy intelligence assistant. How can I help you today?"
+    ctx.verdict = "clear"
+    ctx.confidence = 1.0
+    ctx.state = QueryState.REASONED
+
+
+def agent_procedure_reason(ctx: QueryContext):
+    """Dedicated reasoning for procedural queries."""
+    from services.agents.procedure_agent import ProcedureAgent
+
+    if ctx.intent != QueryIntent.PROCEDURE:
+        return
+
+    try:
+        proc_agent = ProcedureAgent()
+        workflow = proc_agent.process(ctx.question, ctx.chunks)
+
+        if workflow:
+            ctx.answer = workflow
+            ctx.state = QueryState.REASONED
+        else:
+            ctx.state = QueryState.RETRIEVED
+    except Exception as e:
+        logger.error(f"Procedure reasoning failed: {e}")
+        ctx.state = QueryState.RETRIEVED
 
 
 # ═══════════════════════════════════════
