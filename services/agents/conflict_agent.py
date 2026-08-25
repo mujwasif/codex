@@ -114,10 +114,18 @@ def _llm_conflict_check(text_a: Any, text_b: Any) -> Dict[str, Any]:
     On failure or malformed output, returns unchecked=False (not a conflict).
     """
     prompt = f"""Analyze these two policy clauses for a semantic conflict while preserving their source context.
-A conflict exists ONLY if the same role, process, or asset is subject to two different, incompatible requirements.
-Compare the subject, role, action, conditions, exceptions, thresholds, time periods, and obligation level.
-Rules for different roles (e.g. Admin vs Employee) are complementary, NOT conflicting.
-Similar wording alone is not a conflict. If the available text is insufficient, return conflict=false and explain what is missing.
+
+You MUST follow this Chain-of-Thought process:
+1. <thinking>
+   - Identify the subject/topic of each clause.
+   - Determine if both clauses address the same role, process, or asset.
+   - Compare: threshold values, obligation levels (must vs should), time periods, scope.
+   - Rules for different roles (e.g. Admin vs Employee) are complementary, NOT conflicting.
+   - Similar wording alone is not a conflict.
+   - If the available text is insufficient, plan to return conflict=false and explain what is missing.
+   </thinking>
+2. Final Output:
+   Respond with the JSON object only.
 
 {_clause_prompt_context(text_a, "CLAUSE A")}
 
@@ -143,6 +151,7 @@ Respond with JSON only:
         return {"conflict": False, "confidence": 0.0, "reason": "LLM call failed", "subject": ""}
 
     raw = result.data.strip()
+    raw = re.sub(r'<thinking>.*?</thinking>', '', raw, flags=re.DOTALL).strip()
     json_match = re.search(r"\{.*\}", raw, re.DOTALL)
     if not json_match:
         yes_match = re.search(r"\b(yes|no)\b", raw.lower())

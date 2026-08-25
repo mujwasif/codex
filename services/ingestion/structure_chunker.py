@@ -3,6 +3,9 @@ from typing import List, Dict, Optional
 from services.ingestion.clause_detector import detect_clauses, get_clause_stats
 
 
+MIN_CLAUSE_TOKENS = 10
+
+
 def chunk_document_clauses(
     sections: List[Dict],
     llama_url: Optional[str] = None,
@@ -102,7 +105,69 @@ def chunk_document_clauses(
                     'is_table': is_table
                 })
 
-    return chunks
+    return _merge_micro_chunks(chunks, max_clause_tokens, overlap_tokens)
+
+
+def _merge_micro_chunks(chunks: List[Dict], max_tokens: int, overlap: int) -> List[Dict]:
+    """Merge chunks below MIN_CLAUSE_TOKENS into their neighbors."""
+    if not chunks:
+        return chunks
+
+    merged = []
+    buffer = None
+
+    for chunk in chunks:
+        token_count = chunk.get('token_count', 0)
+
+        if token_count < MIN_CLAUSE_TOKENS:
+            if buffer is None:
+                buffer = dict(chunk)
+            else:
+                buffer['text'] = buffer['text'] + " " + chunk['text']
+                buffer['token_count'] = len(buffer['text'].split())
+        else:
+            if buffer is not None:
+                merged_text = buffer['text'] + " " + chunk['text']
+                merged_tokens = len(merged_text.split())
+                if merged_tokens <= max_tokens:
+                    merged.append({
+                        'section_path': chunk['section_path'],
+                        'clause_ref': chunk['clause_ref'],
+                        'heading_hierarchy': chunk['heading_hierarchy'],
+                        'text': merged_text,
+                        'token_count': merged_tokens,
+                        'page': chunk['page'],
+                        'clause_number': chunk.get('clause_number', 0),
+                        'is_table': chunk.get('is_table', False),
+                    })
+                else:
+                    sub_clauses = _split_long_clause_with_overlap(
+                        merged_text, max_tokens, overlap
+                    )
+                    for sub_text in sub_clauses:
+                        merged.append({
+                            'section_path': chunk['section_path'],
+                            'clause_ref': chunk['clause_ref'],
+                            'heading_hierarchy': chunk['heading_hierarchy'],
+                            'text': sub_text,
+                            'token_count': len(sub_text.split()),
+                            'page': chunk['page'],
+                            'clause_number': chunk.get('clause_number', 0),
+                            'is_table': chunk.get('is_table', False),
+                        })
+                buffer = None
+            else:
+                merged.append(chunk)
+
+    if buffer is not None:
+        if merged:
+            prev = merged[-1]
+            prev['text'] = prev['text'] + " " + buffer['text']
+            prev['token_count'] = len(prev['text'].split())
+        else:
+            merged.append(buffer)
+
+    return merged
 
 
 def _split_long_clause_with_overlap(

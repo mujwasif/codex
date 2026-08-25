@@ -37,6 +37,7 @@ class QueryIntent(enum.Enum):
     CONFLICT = "conflict"
     COMPLIANCE = "compliance"
     PROCEDURE = "procedure"
+    CONVERSATIONAL = "conversational"
 
 
 @dataclass
@@ -377,6 +378,30 @@ def _keyword_classify(question: str) -> tuple[QueryIntent, float]:
     return QueryIntent.GENERAL, 0.5
 
 
+def agent_conversational(ctx: QueryContext):
+    """Handle greetings, thanks, and casual conversation without retrieval."""
+    q = (ctx.raw_question or ctx.question).lower().strip().rstrip("?.!")
+    if q in ("hello", "hi", "hey", "hi there", "hey there"):
+        ctx.answer = "Hello! I'm Codex, your policy intelligence assistant. How can I help you today?"
+    elif "thank" in q:
+        ctx.answer = "You're welcome! Let me know if you have any other policy questions."
+    elif q in ("bye", "goodbye", "see you", "see ya"):
+        ctx.answer = "Goodbye! Feel free to come back anytime."
+    elif "good morning" in q:
+        ctx.answer = "Good morning! I'm Codex. What policy questions can I help you with?"
+    elif "good afternoon" in q:
+        ctx.answer = "Good afternoon! I'm Codex. What policy questions can I help you with?"
+    elif "good evening" in q:
+        ctx.answer = "Good evening! I'm Codex. What policy questions can I help you with?"
+    elif "how are you" in q:
+        ctx.answer = "I'm doing well, thank you! I'm here to help with any policy questions you might have."
+    else:
+        ctx.answer = "Hi there! I'm Codex, your policy intelligence assistant. How can I help you today?"
+    ctx.verdict = "clear"
+    ctx.confidence = 1.0
+    ctx.state = QueryState.REASONED
+
+
 def agent_procedure_reason(ctx: QueryContext):
     """
     Dedicated reasoning for procedural queries.
@@ -476,11 +501,19 @@ general: explain,tell me about,what is,what does,does the policy cover,can you e
   "Give me an overview of security policies" → general,0.66
   "I want to know about company benefits" → general,0.64
 
+conversational: hello,hi,hey,thanks,thank you,bye,goodbye,good morning,good afternoon,good evening,how are you,what's up,ok,okay,sure,please,help
+  "Hello" → conversational,0.99
+  "Hi there" → conversational,0.99
+  "Thanks!" → conversational,0.99
+  "Good morning" → conversational,0.98
+  "Bye" → conversational,0.98
+  "How are you?" → conversational,0.97
+
 Question: {question}"""
 
     result = llm_generate(
         model=QWEN3_8B_MODEL,
-        system_prompt="Classify questions into: approval, conflict, compliance, procedure, general",
+        system_prompt="Classify questions into: approval, conflict, compliance, procedure, general, conversational",
         user_message=prompt,
         temperature=0.0,
         max_tokens=15,
@@ -496,11 +529,12 @@ Question: {question}"""
             "compliance": QueryIntent.COMPLIANCE,
             "procedure": QueryIntent.PROCEDURE,
             "general": QueryIntent.GENERAL,
+            "conversational": QueryIntent.CONVERSATIONAL,
         }
 
         # Format 1: "procedure,0.95"
         match = re.search(
-            r"(approval|conflict|compliance|procedure|general)[,:\-]\s*([\d.]+)",
+            r"(approval|conflict|compliance|procedure|general|conversational)[,:\-]\s*([\d.]+)",
             raw
         )
         if match:
@@ -512,7 +546,7 @@ Question: {question}"""
         else:
             # Format 2: "intent: X" (or bare intent) with optional "confidence: high|medium|low"
             intent_match = re.search(
-                r"(approval|conflict|compliance|procedure|general)", raw
+                r"(approval|conflict|compliance|procedure|general|conversational)", raw
             )
             conf_match = re.search(
                 r"confidence[\s:]*?(high|medium|low)", raw
@@ -766,6 +800,7 @@ INTENT_PIPELINES = {
     QueryIntent.COMPLIANCE: [agent_retrieve, agent_risk_compliance, agent_reason, agent_verify],
     QueryIntent.PROCEDURE: [agent_retrieve, agent_procedure_reason, agent_verify],
     QueryIntent.GENERAL: DEFAULT_PIPELINE,
+    QueryIntent.CONVERSATIONAL: [agent_conversational],
 }
 
 

@@ -5,10 +5,23 @@ Generates grounded answers from retrieved clauses using Qwen3-8B.
 Enforces cite-or-abstain invariant.
 """
 
+import re
+
 from services.agents.tools.llm_tools import llm_generate, QWEN3_8B_MODEL
 
 SYSTEM_PROMPT = """
 You are the Codex Policy Intelligence Engine. Your goal is to provide grounded, cited answers based ONLY on the provided context.
+
+You MUST follow this Chain-of-Thought process:
+1. <thinking>
+   - Read the question carefully and identify the core information need.
+   - Scan each chunk and identify which ones are relevant to the question.
+   - For each claim you plan to make, verify the exact citation source (title + clause_ref).
+   - Check if the context contains enough information to answer fully. If any part of the question cannot be answered from the context, plan to say "Insufficient policy basis" for that part only.
+   - Map every claim to at least one specific citation before writing the final answer.
+   </thinking>
+2. Final Answer:
+   Provide the grounded answer with [Doc: X, Clause: Y] citations after each claim.
 
 STRICT RULES:
 1. Use ONLY the provided context. Do not use outside knowledge.
@@ -21,7 +34,7 @@ STRICT RULES:
 
 
 def generate_grounded_answer(query, context_chunks, feedback_guidance=""):
-    \"\"\"
+    """
     Generate a grounded answer from retrieved clauses.
     
     Args:
@@ -31,7 +44,7 @@ def generate_grounded_answer(query, context_chunks, feedback_guidance=""):
         
     Returns:
         Answer string with bracketed citations
-    \"\"\"
+    """
     # Format the retrieved chunks into a readable block for the LLM
     context_text = "\n\n".join([
         f"[Doc: {c['title']}, Clause: {c.get('clause_ref', 'N/A')}]: {c['text']}"
@@ -60,7 +73,9 @@ def generate_grounded_answer(query, context_chunks, feedback_guidance=""):
     )
 
     if result.success:
-        return result.data
+        answer = result.data.strip()
+        answer = re.sub(r'<thinking>.*?</thinking>', '', answer, flags=re.DOTALL).strip()
+        return answer
     else:
         return f"Error connecting to hosted LLM API: {result.error}"
 

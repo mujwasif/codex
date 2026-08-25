@@ -426,11 +426,9 @@ def render_ingestion_tab(token):
         key="ingestion_file_uploader",
     )
 
-    col_a, col_b = st.columns([1, 1])
+    col_a = st.columns(1)[0]
     with col_a:
         upload_clicked = st.button("Upload Policies", type="primary", use_container_width=True)
-    with col_b:
-        refresh_clicked = st.button("Refresh Status", use_container_width=True)
 
     if uploaded and upload_clicked:
         if isinstance(uploaded, list):
@@ -463,10 +461,12 @@ def render_ingestion_tab(token):
         else:
             st.error("No documents were successfully queued.")
 
-    if refresh_clicked:
-        st.rerun()
-
     st.divider()
+    render_ingestion_auto_refresh(token)
+
+
+@st.fragment(run_every=2)
+def render_ingestion_auto_refresh(token):
     with st.spinner("Loading ingestion status..."):
         status_data = fetch_ingestion_status(token)
     render_ingestion_status_panel(status_data, token)
