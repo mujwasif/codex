@@ -6,8 +6,10 @@ from datetime import datetime
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 API_BASE_URL = os.getenv("CODEX_API_URL", "http://127.0.0.1:8000")
+COOKIE_NAME = "codex_token"
 
 
 def token_payload(token):
@@ -18,6 +20,63 @@ def token_payload(token):
         return json.loads(base64.urlsafe_b64decode(payload))
     except Exception:
         return {}
+
+
+def _set_cookie(name, value, max_age=2592000):
+    """Write a cookie to the browser via JavaScript. max_age defaults to 30 days."""
+    safe_val = value.replace("'", "\\'").replace(";", "\\;")
+    components.html(
+        f"""<script>
+        document.cookie = '{name}={safe_val}; path=/; max-age={max_age}; SameSite=Lax';
+        </script>""",
+        height=0,
+    )
+
+
+def _get_cookie_js(name):
+    """Read a cookie value from the browser via JavaScript."""
+    from streamlit_javascript import st_javascript
+    try:
+        result = st_javascript(
+            f"document.cookie.split('; ').find(c => c.startsWith('{name}='))?.split('=')[1] || null"
+        )
+        return result if result else None
+    except Exception:
+        return None
+
+
+def _clear_cookie(name):
+    """Expire a cookie in the browser."""
+    components.html(
+        f"""<script>
+        document.cookie = '{name}=; path=/; max-age=0';
+        </script>""",
+        height=0,
+    )
+
+
+def _restore_session_from_cookie():
+    """Try to restore token + username from the cookie on page load."""
+    if st.session_state.get("token"):
+        return
+
+    cookie_token = _get_cookie_js(COOKIE_NAME)
+    if not cookie_token:
+        return
+
+    from packages.shared.auth import verify_token
+    payload = verify_token(cookie_token)
+    if not payload:
+        _clear_cookie(COOKIE_NAME)
+        return
+
+    st.session_state.token = cookie_token
+    st.session_state.username = payload.get("username", "")
+    try:
+        history = fetch_chat_history(cookie_token)
+        st.session_state.messages = messages_from_history(history) if history else []
+    except Exception:
+        st.session_state.messages = []
 
 
 def fetch_ingestion_status(token):
@@ -1007,6 +1066,12 @@ if "active_view" not in st.session_state:
     st.session_state.active_view = "assistant"
 if "pending" not in st.session_state:
     st.session_state.pending = None
+if "cookie_restored" not in st.session_state:
+    st.session_state.cookie_restored = False
+
+if not st.session_state.token and not st.session_state.cookie_restored:
+    st.session_state.cookie_restored = True
+    _restore_session_from_cookie()
 
 
 def login_user(username, password):
@@ -1110,6 +1175,7 @@ if not st.session_state.token:
                     if token:
                         st.session_state.token = token
                         st.session_state.username = username_input
+                        _set_cookie(COOKIE_NAME, token)
                         history = fetch_chat_history(token)
                         st.session_state.messages = messages_from_history(history) if history else []
                         st.rerun()
@@ -1139,9 +1205,11 @@ with st.sidebar:
             st.rerun()
 
     if st.button("Log Out", use_container_width=True):
+        _clear_cookie(COOKIE_NAME)
         st.session_state.token = None
         st.session_state.username = None
         st.session_state.messages = []
+        st.session_state.cookie_restored = False
         st.session_state.active_view = "assistant"
         st.rerun()
 
