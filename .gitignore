@@ -39,3 +39,6 @@ processed_docs.txt
 # Empty placeholder dirs that get committed accidentally
 init.sql/
 eval/
+
+# Policy document archives (uploaded via UI)
+archive/

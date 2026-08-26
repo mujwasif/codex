@@ -6,10 +6,8 @@ from datetime import datetime
 
 import requests
 import streamlit as st
-import streamlit.components.v1 as components
 
 API_BASE_URL = os.getenv("CODEX_API_URL", "http://127.0.0.1:8000")
-COOKIE_NAME = "codex_token"
 
 
 def token_payload(token):
@@ -21,62 +19,6 @@ def token_payload(token):
     except Exception:
         return {}
 
-
-def _set_cookie(name, value, max_age=2592000):
-    """Write a cookie to the browser via JavaScript. max_age defaults to 30 days."""
-    safe_val = value.replace("'", "\\'").replace(";", "\\;")
-    components.html(
-        f"""<script>
-        document.cookie = '{name}={safe_val}; path=/; max-age={max_age}; SameSite=Lax';
-        </script>""",
-        height=0,
-    )
-
-
-def _get_cookie_js(name):
-    """Read a cookie value from the browser via JavaScript."""
-    from streamlit_javascript import st_javascript
-    try:
-        result = st_javascript(
-            f"document.cookie.split('; ').find(c => c.startsWith('{name}='))?.split('=')[1] || null"
-        )
-        return result if result else None
-    except Exception:
-        return None
-
-
-def _clear_cookie(name):
-    """Expire a cookie in the browser."""
-    components.html(
-        f"""<script>
-        document.cookie = '{name}=; path=/; max-age=0';
-        </script>""",
-        height=0,
-    )
-
-
-def _restore_session_from_cookie():
-    """Try to restore token + username from the cookie on page load."""
-    if st.session_state.get("token"):
-        return
-
-    cookie_token = _get_cookie_js(COOKIE_NAME)
-    if not cookie_token:
-        return
-
-    from packages.shared.auth import verify_token
-    payload = verify_token(cookie_token)
-    if not payload:
-        _clear_cookie(COOKIE_NAME)
-        return
-
-    st.session_state.token = cookie_token
-    st.session_state.username = payload.get("username", "")
-    try:
-        history = fetch_chat_history(cookie_token)
-        st.session_state.messages = messages_from_history(history) if history else []
-    except Exception:
-        st.session_state.messages = []
 
 
 def fetch_ingestion_status(token):
@@ -1066,44 +1008,6 @@ if "active_view" not in st.session_state:
     st.session_state.active_view = "assistant"
 if "pending" not in st.session_state:
     st.session_state.pending = None
-if "cookie_restored" not in st.session_state:
-    st.session_state.cookie_restored = False
-
-if not st.session_state.token and not st.session_state.cookie_restored:
-    st.session_state.cookie_restored = True
-    _restore_session_from_cookie()
-
-
-def login_user(username, password):
-    try:
-        response = requests.post(
-            f"{API_BASE_URL}/login",
-            data={"username": username, "password": password},
-            timeout=10,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data.get("access_token")
-    except requests.exceptions.RequestException as e:
-        st.error(f"Authentication failed: {e}")
-        return None
-
-
-def ask_codex(question: str):
-    headers = {"Authorization": f"Bearer {st.session_state.token}"}
-
-    try:
-        response = requests.post(
-            f"{API_BASE_URL}/query",
-            json={"question": question, "search_mode": "hybrid"},
-            headers=headers,
-            timeout=120,
-        )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Query error: {e}")
-        return None
 
 
 def fetch_chat_history(token):
@@ -1114,7 +1018,7 @@ def fetch_chat_history(token):
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        print(f"⚠️ Failed to fetch chat history: {e}")
+        print(f"Failed to fetch chat history: {e}")
         return None
 
 
@@ -1154,8 +1058,56 @@ def messages_from_history(history):
     return messages
 
 
+if not st.session_state.get("token"):
+    url_token = st.query_params.get("token")
+    if url_token:
+        from packages.shared.auth import verify_token
+        payload = verify_token(url_token)
+        if payload:
+            st.session_state.token = url_token
+            st.session_state.username = payload.get("username", "")
+            try:
+                history = fetch_chat_history(url_token)
+                st.session_state.messages = messages_from_history(history) if history else []
+            except Exception:
+                st.session_state.messages = []
+        else:
+            del st.query_params["token"]
+
+
+def login_user(username, password):
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/login",
+            data={"username": username, "password": password},
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("access_token")
+    except requests.exceptions.RequestException as e:
+        st.error(f"Authentication failed: {e}")
+        return None
+
+
+def ask_codex(question: str):
+    headers = {"Authorization": f"Bearer {st.session_state.token}"}
+
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/query",
+            json={"question": question, "search_mode": "hybrid"},
+            headers=headers,
+            timeout=120,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Query error: {e}")
+        return None
+
+
 if not st.session_state.token:
-    st.title("Codex Policy Intelligence Engine")
     st.subheader("Authentication Required")
 
     col1, col2, col3 = st.columns([1, 2, 1])
@@ -1175,7 +1127,7 @@ if not st.session_state.token:
                     if token:
                         st.session_state.token = token
                         st.session_state.username = username_input
-                        _set_cookie(COOKIE_NAME, token)
+                        st.query_params["token"] = token
                         history = fetch_chat_history(token)
                         st.session_state.messages = messages_from_history(history) if history else []
                         st.rerun()
@@ -1205,11 +1157,11 @@ with st.sidebar:
             st.rerun()
 
     if st.button("Log Out", use_container_width=True):
-        _clear_cookie(COOKIE_NAME)
+        if "token" in st.query_params:
+            del st.query_params["token"]
         st.session_state.token = None
         st.session_state.username = None
         st.session_state.messages = []
-        st.session_state.cookie_restored = False
         st.session_state.active_view = "assistant"
         st.rerun()
 
