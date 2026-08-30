@@ -455,6 +455,22 @@ Q: "How do the Clear Desk Policy and the Physical Security Policy differ?"
 → Thinking: User names 2 policies and asks how they differ.
 → {{"intent":"conflict","confidence":0.90,"conflict_type":"type_2","doc_phrases":["Clear Desk Policy","Physical Security Policy"]}}
 
+Q: "Compare BYOD and Remote Access for conflicts"
+→ Thinking: User names 2 policies and explicitly asks to compare them for conflicts. This is a conflict comparison.
+→ {{"intent":"conflict","confidence":0.95,"conflict_type":"type_2","doc_phrases":["BYOD Policy","Remote Access Policy"]}}
+
+Q: "Compare the Change Management Policy and the Incident Response Plan for conflicts"
+→ Thinking: User names 2 policies and asks to compare them for conflicts.
+→ {{"intent":"conflict","confidence":0.94,"conflict_type":"type_2","doc_phrases":["Change Management Policy","Incident Response Plan"]}}
+
+Q: "What are the differences between the Backup Policy and the Data Retention Policy?"
+→ Thinking: User asks about differences between 2 named policies. This is a conflict/difference query.
+→ {{"intent":"conflict","confidence":0.91,"conflict_type":"type_2","doc_phrases":["Backup Policy","Data Retention Policy"]}}
+
+Q: "Are there conflicts between the Clear Desk Policy and Physical Security Policy?"
+→ Thinking: User explicitly asks about conflicts between 2 named policies.
+→ {{"intent":"conflict","confidence":0.93,"conflict_type":"type_2","doc_phrases":["Clear Desk Policy","Physical Security Policy"]}}
+
 Q: "Does the Incident Response Plan conflict with anything?"
 → Thinking: User names 1 policy and asks about conflicts with other policies.
 → {{"intent":"conflict","confidence":0.93,"conflict_type":"type_2b","doc_phrases":["Incident Response Plan"]}}
@@ -604,6 +620,24 @@ def agent_retrieve(ctx: QueryContext):
             bm25_index=get_bm25_index(),
             top_k_retrieval=top_k,
         )
+
+        # Enrich with resolved document chunks (for GENERAL/PROCEDURE
+        # when doc_phrases are available but intent was misclassified)
+        if ctx.resolved_doc_ids and ctx.intent in (
+            QueryIntent.GENERAL, QueryIntent.PROCEDURE
+        ):
+            from services.api.search import fetch_chunks_by_document
+            doc_chunks_map = fetch_chunks_by_document(
+                ctx.resolved_doc_ids, ctx.access_level
+            )
+            if doc_chunks_map:
+                existing_ids = {c.get("id") for c in ctx.chunks}
+                for doc_id, chunks in doc_chunks_map.items():
+                    for chunk in chunks:
+                        if chunk.get("id") not in existing_ids:
+                            ctx.chunks.append(chunk)
+                            existing_ids.add(chunk.get("id"))
+
         ctx.state = QueryState.RETRIEVED
     except Exception as e:
         ctx.fail(f"Retrieval failed: {e}")
@@ -702,6 +736,18 @@ def agent_reason(ctx: QueryContext):
         ctx.answer = generate_grounded_answer(
             final_query, ctx.chunks, feedback_guidance=feedback_guidance
         )
+
+        # Safety net: if the reasoner produced "Insufficient policy basis" for
+        # a comparison question, the intent was likely misclassified. Append a
+        # hint so the user can retry with the correct intent.
+        q_lower = (ctx.raw_question or ctx.question).lower()
+        if ("Insufficient" in (ctx.answer or "")
+                and any(w in q_lower for w in ("compare", "versus", "conflict", "differ"))):
+            ctx.answer += (
+                "\n\nNote: This question may be better answered as a conflict "
+                "analysis. Try rephrasing with 'Compare X and Y for conflicts'."
+            )
+
         ctx.state = QueryState.REASONED
     except Exception as e:
         ctx.fail(f"Reasoning failed: {e}")
