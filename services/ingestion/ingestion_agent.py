@@ -194,18 +194,17 @@ def process_chunking_stage(doc_id: str, model: SentenceTransformer, idx: int, to
         filename = row.title
         file_path = row.source_uri
 
-    print(f"  [{idx}/{total}] Chunking: {filename}")
     logger.info(f"Chunking [{idx}/{total}]: {filename}")
 
     sections = parse_document_structure(file_path)
     if not sections:
-        print(f"    -> Failed: no content found")
+        logger.error(f"    -> Failed: no content found")
         _mark_failed(doc_id, f"No content found in {filename}")
         return False
 
     full_text = "\n".join([s.get("content", "") for s in sections])
     if not full_text.strip():
-        print(f"    -> Failed: no text content")
+        logger.error(f"    -> Failed: no text content")
         _mark_failed(doc_id, "No text content in document")
         return False
 
@@ -215,7 +214,6 @@ def process_chunking_stage(doc_id: str, model: SentenceTransformer, idx: int, to
     try:
         chunks = chunk_document_clauses(
             sections,
-            llama_url=None,
             max_clause_tokens=MAX_CLAUSE_TOKENS,
             overlap_tokens=OVERLAP_TOKENS,
             use_llm=USE_LLM,
@@ -252,19 +250,18 @@ def process_chunking_stage(doc_id: str, model: SentenceTransformer, idx: int, to
             doc.last_error = None
             session.commit()
 
-        print(
+        logger.info(
             f"    -> {stats['total_chunks']} clause-level chunks "
             f"from {stats['unique_sections']} sections"
         )
         return True
 
     except Exception as e:
-        print(f"    -> Failed: {e}")
         logger.error(f"Chunking failed for {filename}: {e}")
         _mark_failed(doc_id, str(e)[:500])
         return False
 
-def process_graph_stage(doc_id: str, idx: int, total: int) -> bool:
+def process_graph_stage(doc_id: str, idx: int, total: int, model=None) -> bool:
     """
     Phase 2: Generate Knowledge Graph for a previously chunked document.
     """
@@ -278,8 +275,7 @@ def process_graph_stage(doc_id: str, idx: int, total: int) -> bool:
         filename = row.title
 
     db_chunk_count = len(_get_chunks_for_document(doc_id))
-    print(f"  [{idx}/{total}] Processing: {filename} ({db_chunk_count} chunks)")
-    logger.info(f"Graphing [{idx}/{total}]: {filename}")
+    logger.info(f"  [{idx}/{total}] Processing: {filename} ({db_chunk_count} chunks)")
 
     try:
         from services.ingestion.llm_graph_generator import (
@@ -331,13 +327,14 @@ def process_graph_stage(doc_id: str, idx: int, total: int) -> bool:
                 doc.ingestion_status = "ready"
                 doc.status = "active"
                 doc.graph_ready_at = datetime.utcnow()
+                if model is not None:
+                    doc.title_embedding = model.encode(doc.title).tolist()
                 doc.last_error = None
                 session.commit()
 
-        print(f"    -> {node_count} nodes, {edge_count} edges")
+        logger.info(f"    -> {node_count} nodes, {edge_count} edges")
         return True
     except Exception as e:
-        print(f"    -> Failed: {e}")
         logger.warning(f"Graph generation failed for {filename}: {e}")
         _mark_failed(doc_id, str(e)[:500])
         return False
@@ -367,9 +364,9 @@ def run_worker():
 
         if pending_docs:
             total = len(pending_docs)
-            print("\n" + "=" * 40)
-            print(f" STAGE 1: CHUNKING ({total} documents)")
-            print("=" * 40)
+            logger.info("\n" + "=" * 40)
+            logger.info(f" STAGE 1: CHUNKING ({total} documents)")
+            logger.info("=" * 40)
             processed = 0
             for i, doc_id in enumerate(pending_docs, 1):
                 if process_chunking_stage(doc_id, model, i, total):
@@ -386,13 +383,13 @@ def run_worker():
                     timeout=10,
                 )
                 if resp.ok:
-                    print("BM25 index refreshed.")
+                    logger.info("BM25 index refreshed.")
                 else:
                     logger.warning(f"Batch index refresh returned {resp.status_code}")
             except Exception as e:
                 logger.warning(f"Batch index refresh failed: {e}")
 
-            print(f"\nChunking done: {processed} processed, {total - processed} failed out of {total}")
+            logger.info(f"\nChunking done: {processed} processed, {total - processed} failed out of {total}")
 
         # STAGE 2: Graph Wave
         ready_for_graph = []
@@ -404,14 +401,14 @@ def run_worker():
 
         if ready_for_graph:
             total = len(ready_for_graph)
-            print("\n" + "=" * 40)
-            print(" STAGE 2: KNOWLEDGE GRAPH (%d documents)" % total)
-            print("=" * 40)
+            logger.info("\n" + "=" * 40)
+            logger.info(" STAGE 2: KNOWLEDGE GRAPH (%d documents)" % total)
+            logger.info("=" * 40)
             processed = 0
             for i, doc_id in enumerate(ready_for_graph, 1):
-                if process_graph_stage(doc_id, i, total):
+                if process_graph_stage(doc_id, i, total, model=model):
                     processed += 1
-            print(f"\nGraph done: {processed} processed, {total - processed} skipped out of {total}")
+            logger.info(f"\nGraph done: {processed} processed, {total - processed} skipped out of {total}")
 
         time.sleep(CLAIM_INTERVAL)
 

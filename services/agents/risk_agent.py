@@ -55,7 +55,7 @@ def _get_clause_obligations(chunks: List[Dict[str, Any]]) -> Dict[str, str]:
 
 def _classify_by_llm(question: str, chunks: List[Dict[str, Any]]) -> Dict[str, Any]:
     context_text = "\n\n".join([
-        f"[Clause {c.get('clause_ref', 'N/A')}]: {(c.get('text') or '')[:500]}"
+        f"[Doc: {c.get('title', 'Unknown')}, Clause: {c.get('clause_ref', 'N/A')}]: {(c.get('text') or '')[:500]}"
         for c in chunks[:10]
     ])
     prompt = f"""Analyze the user's question and the policy context below to classify the compliance risk.
@@ -72,7 +72,7 @@ def _classify_by_llm(question: str, chunks: List[Dict[str, Any]]) -> Dict[str, A
     2. Final Output:
        Provide a JSON response with the following keys:
        - "verdict": "clear", "conditional", or "violation"
-       - "elaboration": A detailed explanation of why this verdict was reached, citing the specific clause. If "clear", explain how it is compliant.
+        - "elaboration": A detailed explanation of why this verdict was reached, with inline [Doc: X, Clause: Y] citations for every claim. If "clear", explain how it is compliant and which clauses satisfy the requirement.
        
        Verdict Guide:
        - clear: No compliance issues; the policy is followed.
@@ -91,9 +91,9 @@ def _classify_by_llm(question: str, chunks: List[Dict[str, Any]]) -> Dict[str, A
         system_prompt="You are a strict compliance officer. Use Chain-of-Thought reasoning to analyze policy risk. Respond ONLY with a JSON object containing 'verdict' and 'elaboration'.",
         user_message=prompt,
         temperature=0.0,
-        max_tokens=500,
+        max_tokens=1024,
         timeout=30.0,
-        enable_thinking=False
+        enable_thinking=True
     )
 
     if result.success:
@@ -173,55 +173,5 @@ def assess_risk(
         "elaboration": elaboration,
         "regulations": regulations,
         "obligations": obligations,
-        "recommendations": recommendations,
-    }
-    """
-    if not chunks:
-        return {
-            "verdict": "abstained",
-            "regulations": [],
-            "obligations": {},
-            "risk_level": "unknown",
-            "recommendations": ["No relevant policy clauses found"],
-        }
-
-    # Get regulations from Neo4j
-    regulations = _get_regulations_for_chunks(chunks)
-
-    # Get obligations from Neo4j
-    obligations = _get_clause_obligations(chunks)
-
-    # Classify verdict
-    verdict = _classify_by_llm(question, chunks)
-
-    # Determine risk level
-    mandatory_count = sum(1 for v in obligations.values() if v == "mandatory")
-    if verdict == "violation":
-        risk_level = "high"
-    elif verdict == "conditional" or mandatory_count > 2:
-        risk_level = "medium"
-    else:
-        risk_level = "low"
-
-    # Generate recommendations
-    recommendations = []
-    if verdict == "violation":
-        recommendations.append("Review the identified violation against applicable regulations")
-        if regulations:
-            recommendations.append(f"Ensure compliance with: {', '.join(regulations)}")
-    elif verdict == "conditional":
-        recommendations.append("Verify all conditions are met before proceeding")
-        recommendations.append("Check approval requirements in the knowledge graph")
-    else:
-        recommendations.append("No immediate compliance concerns detected")
-
-    if mandatory_count > 0:
-        recommendations.append(f"{mandatory_count} mandatory obligation(s) apply to retrieved clauses")
-
-    return {
-        "verdict": verdict,
-        "regulations": regulations,
-        "obligations": obligations,
-        "risk_level": risk_level,
         "recommendations": recommendations,
     }

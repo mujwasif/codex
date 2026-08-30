@@ -15,6 +15,8 @@ from packages.shared.schemas import (
     AnswerResponse,
     CitationResponse,
     ConflictAnalysisResponse,
+    ResolvedDoc,
+    DocumentSlot,
 )
 from packages.shared.db import get_db_session
 from packages.shared.models import Query, Answer, Citation, Chunk, Document, User
@@ -159,6 +161,12 @@ async def secure_query(
             prior_intent = QueryIntent(last_intent)
 
     search_mode = query_data.search_mode or "hybrid"
+
+    # If user selected documents (Phase 2), force conflict intent
+    selected_doc_ids = query_data.selected_doc_ids
+    if selected_doc_ids:
+        prior_intent = QueryIntent.CONFLICT
+
     ctx = run_pipeline(
         question=pipeline_question,
         raw_question=query_data.question,
@@ -167,6 +175,7 @@ async def secure_query(
         department=department,
         search_mode=search_mode,
         prior_intent=prior_intent,
+        selected_doc_ids=selected_doc_ids,
     )
 
     # 4. Extract results from context
@@ -262,15 +271,44 @@ async def secure_query(
                 total_candidates=ctx.conflict_analysis.get("total_candidates", 0),
                 checked_candidates=ctx.conflict_analysis.get("checked_candidates", 0),
                 unchecked_candidates=ctx.conflict_analysis.get(
-                    "unchecked_candidates", 0
+                     "unchecked_candidates", 0
                 ),
                 llm_calls=ctx.conflict_analysis.get("llm_calls", 0),
                 truncated=ctx.conflict_analysis.get("truncated", False),
                 inconclusive=ctx.conflict_analysis.get("inconclusive", False),
+                evaluated_top_k=ctx.conflict_analysis.get("evaluated_top_k", False),
+                coverage_note=ctx.conflict_analysis.get("coverage_note"),
+                genuine_failures=ctx.conflict_analysis.get("genuine_failures", 0),
             )
             if ctx.intent.value == "conflict" and ctx.conflict_analysis
             else None
         ),
+        resolved_documents=[
+            ResolvedDoc(
+                id=r.get("id", ""),
+                title=r.get("title", ""),
+                similarity=round(r.get("similarity", 0.0), 3),
+                selected=r.get("selected", True),
+            )
+            for r in ctx.resolved_documents
+            if r.get("id")
+        ] if ctx.resolved_documents else None,
+        document_slots=[
+            DocumentSlot(
+                slot=s["slot"],
+                phrase=s["phrase"],
+                candidates=[
+                    ResolvedDoc(
+                        id=c["id"],
+                        title=c["title"],
+                        similarity=round(c["similarity"], 3),
+                        selected=c.get("selected", False),
+                    )
+                    for c in s["candidates"]
+                ],
+            )
+            for s in ctx.doc_slots
+        ] if ctx.doc_slots else None,
         next_steps=ctx.build_next_steps(),
         missing=ctx.build_missing(),
         created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),

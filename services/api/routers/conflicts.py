@@ -25,7 +25,11 @@ def _resolve_document_ids(
     doc_names: list[str] | None,
     access_level: int,
 ) -> list[str]:
-    """Resolve document IDs or names to validated, accessible IDs."""
+    """Resolve document IDs or names to validated, accessible IDs.
+
+    For document_names, uses title embedding vector search first (handles
+    partial/colloquial names), then falls back to exact ILIKE match.
+    """
     if not doc_ids and not doc_names:
         raise HTTPException(
             status_code=400, detail="Provide document_ids or document_names"
@@ -60,9 +64,35 @@ def _resolve_document_ids(
                 )
             return list(accessible_ids)
 
+        from services.api.search import resolve_documents_by_name
+
         resolved = []
         for name in doc_names:
-            matches = (
+            # Try vector search first (handles partial/colloquial names)
+            matches = resolve_documents_by_name(
+                name, access_level, top_k=3, threshold=0.35
+            )
+            if len(matches) == 1:
+                resolved.append(matches[0]["id"])
+                continue
+
+            if len(matches) > 1:
+                # Multiple close matches — check if one is a clear winner
+                top_sim = matches[0]["similarity"]
+                second_sim = matches[1]["similarity"]
+                if top_sim - second_sim > 0.05:
+                    # Clear winner
+                    resolved.append(matches[0]["id"])
+                    continue
+                # Ambiguous — return candidates
+                candidates = [{"id": m["id"], "title": m["title"], "similarity": round(m["similarity"], 3)} for m in matches]
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Ambiguous document name '{name}'. Matches: {candidates}",
+                )
+
+            # No vector matches — fall back to exact ILIKE
+            ilike_matches = (
                 session.query(Document)
                 .filter(
                     Document.title.ilike(name.strip()),
@@ -71,17 +101,26 @@ def _resolve_document_ids(
                 )
                 .all()
             )
-            if len(matches) == 0:
-                raise HTTPException(
-                    status_code=404, detail=f"Document not found: '{name}'"
+            if len(ilike_matches) == 0:
+                # Suggest available titles
+                available = (
+                    session.query(Document.title)
+                    .filter(Document.ingestion_status == "ready", Document.access_level <= access_level)
+                    .limit(20)
+                    .all()
                 )
-            if len(matches) > 1:
-                candidates = [{"id": str(m.id), "title": m.title} for m in matches]
+                available_titles = [t[0] for t in available]
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Document not found: '{name}'. Available documents: {available_titles}",
+                )
+            if len(ilike_matches) > 1:
+                candidates = [{"id": str(m.id), "title": m.title} for m in ilike_matches]
                 raise HTTPException(
                     status_code=409,
                     detail=f"Ambiguous document name '{name}'. Matches: {candidates}",
                 )
-            resolved.append(str(matches[0].id))
+            resolved.append(str(ilike_matches[0].id))
         return resolved
 
 

@@ -2,6 +2,7 @@ import base64
 import html
 import json
 import os
+import uuid
 from datetime import datetime
 
 import requests
@@ -1008,6 +1009,10 @@ if "active_view" not in st.session_state:
     st.session_state.active_view = "assistant"
 if "pending" not in st.session_state:
     st.session_state.pending = None
+if "selected_doc_ids" not in st.session_state:
+    st.session_state.selected_doc_ids = None
+if "pending_conflict_question" not in st.session_state:
+    st.session_state.pending_conflict_question = None
 
 
 def fetch_chat_history(token):
@@ -1090,15 +1095,17 @@ def login_user(username, password):
         return None
 
 
-def ask_codex(question: str):
+def ask_codex(question: str, selected_doc_ids=None):
     headers = {"Authorization": f"Bearer {st.session_state.token}"}
-
+    payload = {"question": question, "search_mode": "hybrid"}
+    if selected_doc_ids:
+        payload["selected_doc_ids"] = selected_doc_ids
     try:
         response = requests.post(
             f"{API_BASE_URL}/query",
-            json={"question": question, "search_mode": "hybrid"},
+            json=payload,
             headers=headers,
-            timeout=120,
+            timeout=300,
         )
         response.raise_for_status()
         return response.json()
@@ -1152,6 +1159,8 @@ with st.sidebar:
             with st.spinner("Deleting chat history..."):
                 result = clear_chat_history(st.session_state.token)
             st.session_state.messages = []
+            st.session_state.selected_doc_ids = None
+            st.session_state.pending_conflict_question = None
             if result and result.get("queries_deleted", 0) > 0:
                 st.success(f"Deleted {result.get('queries_deleted')} saved question(s) from history.")
             st.rerun()
@@ -1178,6 +1187,8 @@ def _verdict_class(verdict):
     if verdict == "violation":
         return "verdict-violation"
     if verdict == "conditional":
+        return "verdict-conditional"
+    if verdict == "pending_selection":
         return "verdict-conditional"
     return "verdict-abstained"
 
@@ -1225,8 +1236,109 @@ def _render_bubble(msg):
             if citations:
                 render_citations(citations)
 
+            # Two-phase conflict: show document slot selectors
+            if verdict == "pending_selection":
+                doc_slots = meta.get("document_slots", [])
+                if doc_slots:
+                    st.markdown("---")
+                    st.markdown("**Select documents to compare:**")
+                    slot_key_prefix = f"slot_{hash(msg.get('content', '')[:50])}"
+                    selected_ids = []
+                    for slot in doc_slots:
+                        phrase = slot.get("phrase", "")
+                        candidates = slot.get("candidates", [])
+                        if not candidates:
+                            continue
+                        labels = [
+                            f"{c.get('title', '?')} (similarity: {c.get('similarity', 0):.2f})"
+                            for c in candidates
+                        ]
+                        selected_label = st.selectbox(
+                            f"Slot {slot.get('slot', '?')}: \"{phrase}\"",
+                            options=labels,
+                            key=f"{slot_key_prefix}_{slot.get('slot', 0)}",
+                        )
+                        idx = labels.index(selected_label)
+                        selected_ids.append(candidates[idx].get("id"))
+
+                    # Store original question and selected IDs for Phase 2
+                    original_q = meta.get("original_question", "")
+                    if st.button(
+                        "Run Conflict Analysis",
+                        key=f"run_{slot_key_prefix}",
+                        type="primary",
+                        use_container_width=True,
+                    ):
+                        st.session_state.selected_doc_ids = selected_ids
+                        st.session_state.pending_conflict_question = original_q
+                        st.rerun()
+
+
+def _store_result(result, original_question=""):
+    """Store a query result as an assistant message."""
+    answer = result.get("answer", "No answer provided.")
+    verdict = result.get("verdict", "unknown")
+    confidence = result.get("confidence", 0.0)
+    citations = result.get("citations", [])
+    reasoning = result.get("reasoning") or {}
+    intent = reasoning.get("intent")
+    intent_confidence = reasoning.get("intent_confidence")
+    approval = reasoning.get("approval")
+    conflicts = reasoning.get("conflicts", [])
+    risk = reasoning.get("risk")
+    next_steps = result.get("next_steps", [])
+
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": answer,
+        "metadata": {
+            "verdict": verdict,
+            "confidence": confidence,
+            "citations": citations,
+            "intent": intent,
+            "intent_confidence": intent_confidence,
+            "approval": approval,
+            "conflicts": conflicts,
+            "risk": risk,
+            "next_steps": next_steps,
+            "document_slots": result.get("document_slots"),
+            "resolved_documents": result.get("resolved_documents"),
+            "original_question": original_question,
+        },
+    })
+
 
 def render_assistant_tab():
+    # Phase 2: Re-submit with user-selected documents
+    if st.session_state.pending_conflict_question and st.session_state.selected_doc_ids:
+        # Validate doc IDs are real UUIDs before proceeding
+        doc_ids = st.session_state.selected_doc_ids
+        try:
+            [uuid.UUID(did) for did in doc_ids]
+        except (ValueError, TypeError):
+            st.session_state.selected_doc_ids = None
+            st.session_state.pending_conflict_question = None
+        else:
+            question = st.session_state.pending_conflict_question
+            st.session_state.pending_conflict_question = None
+            st.session_state.selected_doc_ids = None
+
+            st.session_state.messages.append({"role": "user", "content": question})
+            with st.chat_message("user"):
+                st.markdown(question)
+
+            with st.chat_message("assistant"):
+                with st.spinner("Running conflict analysis on selected documents..."):
+                    result = ask_codex(question, selected_doc_ids=doc_ids)
+
+            if result:
+                _store_result(result, question)
+            else:
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": "Error processing your request. Please check connection."}
+                )
+            st.rerun()
+
     if prompt := st.chat_input("Ask a policy question..."):
         st.session_state.messages.append({"role": "user", "content": prompt})
         st.session_state.pending = prompt
@@ -1242,35 +1354,7 @@ def render_assistant_tab():
                     result = ask_codex(st.session_state.pending)
 
             if result:
-                answer = result.get("answer", "No answer provided.")
-                verdict = result.get("verdict", "unknown")
-                confidence = result.get("confidence", 0.0)
-                citations = result.get("citations", [])
-                reasoning = result.get("reasoning") or {}
-                intent = reasoning.get("intent")
-                intent_confidence = reasoning.get("intent_confidence")
-                approval = reasoning.get("approval")
-                conflicts = reasoning.get("conflicts", [])
-                risk = reasoning.get("risk")
-                next_steps = result.get("next_steps", [])
-
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": answer,
-                        "metadata": {
-                            "verdict": verdict,
-                            "confidence": confidence,
-                            "citations": citations,
-                            "intent": intent,
-                            "intent_confidence": intent_confidence,
-                            "approval": approval,
-                            "conflicts": conflicts,
-                            "risk": risk,
-                            "next_steps": next_steps,
-                        },
-                    }
-                )
+                _store_result(result, st.session_state.pending)
             else:
                 st.session_state.messages.append(
                     {"role": "assistant", "content": "Error processing your request. Please check connection."}

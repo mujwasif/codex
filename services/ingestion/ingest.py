@@ -113,7 +113,6 @@ def ingest_file(file_path: str, session, force: bool = False):
         print(f"  Chunking {filename} with clause-level detection...")
         chunks = chunk_document_clauses(
             sections,
-            llama_url=None,
             max_clause_tokens=MAX_CLAUSE_TOKENS,
             overlap_tokens=OVERLAP_TOKENS,
             use_llm=USE_LLM,

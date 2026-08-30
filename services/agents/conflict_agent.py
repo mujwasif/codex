@@ -142,7 +142,7 @@ Respond with JSON only:
         ),
         user_message=prompt,
         temperature=0.0,
-        max_tokens=120,
+        max_tokens=1024,
         timeout=15.0,
         enable_thinking=False,
     )
@@ -184,56 +184,184 @@ Respond with JSON only:
 
 
 # ---------------------------------------------------------------------------
-# Candidate pair generation (cross-document)
+# Batch conflict check (single LLM call for all candidates)
 # ---------------------------------------------------------------------------
 
-def _build_cross_doc_pairs(
-    chunks: List[Dict[str, Any]],
-    source_chunks: Optional[List[Dict[str, Any]]] = None,
-) -> List[Dict[str, Any]]:
+def _batch_conflict_check(
+    candidate_pairs: List[Dict[str, Any]],
+    target_doc_title: str,
+) -> Optional[List[Dict[str, Any]]]:
     """
-    Build cross-document candidate pairs from a list of chunks.
+    Analyze all candidate pairs in a single LLM call.
 
-    If source_chunks is provided, only pairs where one chunk is from
-    source_chunks and the other is from a different document are returned.
-    Otherwise, all cross-document pairs from chunks are returned.
+    Pairs are grouped by target clause so the LLM sees each target alongside
+    its matched candidates — no unnecessary targets, no unmatched candidates.
+
+    Returns:
+        List of conflict records in the same format as _build_conflict_record.
     """
-    from services.api.search import find_similar_clauses
+    if not candidate_pairs:
+        return []
 
-    pairs = []
-    seen = set()
-    anchor_set = source_chunks if source_chunks else chunks
+    MAX_CANDIDATE_CHARS = 400
+    MAX_TARGET_CHARS = 1200
 
-    for src in anchor_set:
-        src_id = src.get("id", "")
-        src_doc = src.get("document_id", "")
-        src_text = src.get("text", "")
-        if not src_text or len(src_text) < 30:
+    from collections import defaultdict
+
+    pairs_by_target: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for pair in candidate_pairs:
+        src_id = pair["source"].get("id", "")
+        pairs_by_target[src_id].append(pair)
+
+    sections = []
+    target_map: Dict[str, Dict[str, Any]] = {}
+    cand_map: Dict[str, Dict[str, Any]] = {}
+    tc_idx = 0
+    cc_idx = 0
+
+    for src_id, pairs in pairs_by_target.items():
+        tc_idx += 1
+        source = pairs[0]["source"]
+        tc_label = f"tc{tc_idx}"
+        target_map[tc_label] = source
+
+        text = str(source.get("text", ""))[:MAX_TARGET_CHARS]
+        ref = source.get("clause_ref", "")
+        ref_part = f" [{ref}]" if ref else ""
+        tgt_line = f'  TARGET [id:{tc_label}]{ref_part}: "{text}"'
+
+        cand_lines = []
+        for p in sorted(pairs, key=lambda x: x.get("similarity", 0), reverse=True):
+            cc_idx += 1
+            cc_label = f"cc{cc_idx}"
+            cand_map[cc_label] = p
+
+            cand = p["candidate"]
+            ctext = str(cand.get("text", ""))[:MAX_CANDIDATE_CHARS]
+            title = cand.get("title", "") or cand.get("document_title", "")
+            crow = p.get("similarity", 0.0)
+            cline = (
+                f'    → CANDIDATE [id:{cc_label}, Doc: {title}, '
+                f'Ref: {cand.get("clause_ref", "")}, sim={crow:.2f}]: "{ctext}"'
+            )
+            cand_lines.append(cline)
+
+        sections.append(f"PAIR {tc_idx}:\n{tgt_line}\n" + "\n".join(cand_lines))
+
+    paired_block = "\n\n".join(sections)
+
+    prompt = f"""You are analyzing "{target_doc_title}" for conflicts with other policies.
+
+Each PAIR below contains a TARGET clause from "{target_doc_title}" and its semantically matched CANDIDATES from other policy documents. Evaluate each pair for contradictions.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{paired_block}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+For each PAIR, answer:
+1. Do the TARGET and CANDIDATE address the SAME subject (same process, data, rule)?
+2. If YES — are the requirements CONTRADICTORY?
+   • Obligation mismatch: "must" vs "should" for the same rule
+   • Threshold mismatch: different numeric values for the same metric
+   • Timeframe mismatch: different deadlines or frequencies
+   • Scope mismatch: different coverage for the same rule
+3. If NO (different subjects) or requirements are compatible → no_conflict.
+
+FILTER false positives:
+  • Different roles for different duties → complementary_scope
+  • More specific clause doesn't contradict general one → no_conflict
+  • Version supersession → possible_conflict with note
+
+Return a JSON object:
+{{
+  "conflicts": [
+    {{
+      "target_id": "tc1",
+      "candidate_id": "cc1",
+      "status": "confirmed_conflict|possible_conflict|no_conflict|complementary_scope|insufficient_context",
+      "subject": "specific topic governed by both clauses",
+      "reason": "evidence-backed explanation quoting both requirements",
+      "confidence": 0.95,
+      "source_requirement": "exact requirement from the target clause",
+      "candidate_requirement": "exact requirement from the candidate clause",
+      "difference_type": "threshold|modality|scope|time|requirement",
+      "scope_overlap": true
+    }}
+  ]
+}}
+
+STATUS: confirmed_conflict (>= 0.85) | possible_conflict (0.50-0.84) | no_conflict | complementary_scope | insufficient_context
+DIFFERENCE_TYPE: threshold | modality | scope | time | requirement
+
+If no conflicts found, return {{"conflicts": []}}."""
+
+    result = llm_generate(
+        model=QWEN3_8B_MODEL,
+        system_prompt=(
+            "You are a senior corporate policy analyst with 20 years of experience in cross-document "
+            "compliance review. You specialize in identifying contradictions between policy documents "
+            "that could create legal, operational, or audit risk for an organization.\n\n"
+            "YOUR METHOD:\n"
+            "1. For each pair, extract the governed subject from both clauses.\n"
+            "2. If subjects match, compare obligation, threshold, timeframe, and scope.\n"
+            "3. Only flag clear contradictions — complementary or more-specific clauses are NOT conflicts.\n"
+            "4. Be precise: quote exact requirements in your reasoning.\n\n"
+            "OUTPUT: Respond ONLY with a valid JSON object. No markdown fences, no extra text."
+        ),
+        user_message=prompt,
+        temperature=0.0,
+        max_tokens=4096,
+        timeout=60.0,
+        enable_thinking=False,
+    )
+
+    if not result.success:
+        return None
+
+    raw = result.data.strip()
+    raw = re.sub(r"<thinking>.*?</thinking>", "", raw, flags=re.DOTALL).strip()
+    json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not json_match:
+        return []
+
+    try:
+        parsed = json.loads(json_match.group())
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+    raw_conflicts = parsed.get("conflicts", [])
+    if not isinstance(raw_conflicts, list):
+        return []
+
+    conflicts = []
+    for rc in raw_conflicts:
+        tid = rc.get("target_id", "")
+        cid = rc.get("candidate_id", "")
+        target_chunk = target_map.get(tid)
+        cand_pair = cand_map.get(cid)
+        if not target_chunk or not cand_pair:
             continue
 
-        similar = find_similar_clauses(
-            clause_text=src_text,
-            access_level=3,
-            exclude_doc_id=src_doc,
-            top_k=5,
-            threshold=0.5,
-        )
+        cand_chunk = cand_pair["candidate"]
+        similarity = cand_pair.get("similarity", 0.0)
 
-        for sim_chunk in similar:
-            cand_id = sim_chunk.get("id", "")
-            pair_key = tuple(sorted([src_id, cand_id]))
-            if pair_key in seen:
-                continue
-            seen.add(pair_key)
-            pairs.append({
-                "source": src,
-                "candidate": sim_chunk,
-                "similarity": sim_chunk.get("similarity", 0.0),
-            })
+        status = rc.get("status", "no_conflict")
+        if status in ("no_conflict", "complementary_scope", "insufficient_context"):
+            continue
 
-    pairs.sort(key=lambda x: x["similarity"], reverse=True)
-    return pairs
+        conflicts.append(_build_conflict_record(
+            target_chunk,
+            cand_chunk,
+            similarity,
+            {**rc, "conflict": True, "source": "batch_llm"},
+        ))
 
+    return conflicts
+
+
+# ---------------------------------------------------------------------------
+# Candidate pair generation (cross-document)
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Core conflict evaluation
@@ -243,18 +371,22 @@ def _evaluate_pairs(
     pairs: List[Dict[str, Any]],
     access_level: int,
     max_llm_calls: int = 5,
+    target_chunks: Optional[List[Dict[str, Any]]] = None,
+    target_doc_title: str = "",
 ) -> Dict[str, Any]:
     """
     Evaluate candidate pairs for conflicts. Returns structured result.
 
-    For each pair:
-      - Neo4j check
-      - Version check
-      - LLM check (up to max_llm_calls)
+    Deterministic checks (Neo4j, version) run first.
+    Then a single batch LLM call evaluates all eligible pairs at once.
     """
     all_conflicts = []
-    llm_calls_used = 0
     unchecked = 0
+    llm_calls_used = 0
+    failed_calls = 0
+
+    deterministic_pairs = []
+    llm_eligible_pairs = []
 
     for pair in pairs:
         src = pair["source"]
@@ -280,29 +412,32 @@ def _evaluate_pairs(
                 ))
             continue
 
-        if llm_calls_used >= max_llm_calls:
-            unchecked += 1
-            continue
-
         text_a = src.get("text", "")[:1200]
         text_b = cand.get("text", "")[:1200]
         if len(text_a) < 50 or len(text_b) < 50:
             unchecked += 1
             continue
 
-        llm_result = _llm_conflict_check(text_a, text_b)
-        llm_calls_used += 1
+        llm_eligible_pairs.append(pair)
 
-        if llm_result.get("conflict"):
-            all_conflicts.append(_build_conflict_record(
-                src, cand, pair["similarity"],
-                {**llm_result, "source": "llm"},
-            ))
+    if llm_eligible_pairs and target_chunks:
+        llm_eligible_pairs = llm_eligible_pairs[:max_llm_calls]
+        llm_calls_used = 1
+        batch_conflicts = _batch_conflict_check(
+            llm_eligible_pairs, target_doc_title
+        )
+        if batch_conflicts is None:
+            failed_calls = 1
+        else:
+            all_conflicts.extend(batch_conflicts)
+    elif llm_eligible_pairs:
+        unchecked += len(llm_eligible_pairs)
 
     return {
         "conflicts": all_conflicts,
         "llm_calls_used": llm_calls_used,
         "unchecked": unchecked,
+        "failed_calls": failed_calls,
     }
 
 
@@ -416,6 +551,7 @@ def compare_document_chunks(
     total_conflicts = 0
     total_candidates = 0
     total_llm_calls = 0
+    failed_calls = 0
     truncated = False
 
     llm_budget_remaining = max_llm_calls
@@ -429,7 +565,7 @@ def compare_document_chunks(
             title_a = chunks_a[0].get("title", "") if chunks_a else ""
             title_b = chunks_b[0].get("title", "") if chunks_b else ""
 
-            pairs = _build_direct_pairs(chunks_a, chunks_b, similarity_threshold, max_pairs)
+            pairs = _build_direct_pairs(chunks_a, chunks_b, similarity_threshold, max_pairs, access_level=access_level)
             total_candidates += len(pairs)
 
             if llm_budget_remaining <= 0:
@@ -443,8 +579,18 @@ def compare_document_chunks(
                 })
                 continue
 
-            eval_result = _evaluate_pairs(pairs, access_level, max_llm_calls=llm_budget_remaining)
+            # Two-pass: take pairs first, then extract only referenced targets
+            initial_pairs = pairs[:min(len(pairs), llm_budget_remaining)]
+            active_ids = {p["source"].get("id", "") for p in initial_pairs}
+            target_tokens = len(active_ids) * 45
+            pair_budget = max(5, min(llm_budget_remaining, (12288 - 1700 - target_tokens) // 110))
+            initial_pairs = initial_pairs[:pair_budget]
+            eval_result = _evaluate_pairs(
+                initial_pairs, access_level, max_llm_calls=pair_budget,
+                target_chunks=chunks_a, target_doc_title=title_a,
+            )
             calls_used = eval_result["llm_calls_used"]
+            failed_calls += eval_result.get("failed_calls", 0)
             llm_budget_remaining -= calls_used
             total_llm_calls += calls_used
 
@@ -465,6 +611,7 @@ def compare_document_chunks(
         "total_conflicts": total_conflicts,
         "total_candidates": total_candidates,
         "total_llm_calls": total_llm_calls,
+        "failed_calls": failed_calls,
         "truncated": truncated,
     }
 
@@ -474,12 +621,14 @@ def _build_direct_pairs(
     chunks_b: List[Dict],
     threshold: float,
     max_pairs: int,
+    access_level: int = 3,
 ) -> List[Dict[str, Any]]:
     """Build all cross-document candidate pairs between two chunk lists."""
-    from services.api.search import find_similar_clauses
+    from services.api.search import find_similar_in_document
 
     pairs = []
     seen = set()
+    target_doc_id = chunks_b[0].get("document_id", "") if chunks_b else ""
 
     for src in chunks_a:
         src_id = src.get("id", "")
@@ -487,17 +636,15 @@ def _build_direct_pairs(
         if not src_text or len(src_text) < 30:
             continue
 
-        similar = find_similar_clauses(
+        similar = find_similar_in_document(
             clause_text=src_text,
-            access_level=3,
-            exclude_doc_id=src.get("document_id", ""),
+            target_doc_id=target_doc_id,
+            access_level=access_level,
             top_k=5,
             threshold=threshold,
         )
 
         for sim_chunk in similar:
-            if sim_chunk.get("document_id") != chunks_b[0].get("document_id", ""):
-                continue
             cand_id = sim_chunk.get("id", "")
             pair_key = tuple(sorted([src_id, cand_id]))
             if pair_key in seen:
@@ -573,57 +720,86 @@ def detect_conflicting_documents(
                 "similarity": sim_chunk.get("similarity", 0.0),
             })
 
-    conflicting_docs = []
-    total_conflicts = 0
-    total_llm_calls = 0
-    llm_budget = max_llm_calls
-    truncated = False
-
     doc_titles = {}
+    all_pairs = []
     for chunks_list in candidates_by_doc.values():
         for p in chunks_list:
             cand = p["candidate"]
             doc_titles[cand.get("document_id", "")] = cand.get("title", "")
+            all_pairs.append(p)
 
-    for doc_id, doc_pairs in candidates_by_doc.items():
-        doc_pairs.sort(key=lambda x: x["similarity"], reverse=True)
-        limited_pairs = doc_pairs[:max_pairs]
+    # Filter out pairs that cannot be meaningfully compared (short text) up front
+    # so they are not miscounted as "could not be evaluated".
+    MIN_TEXT = 50
+    evaluable = [
+        p for p in all_pairs
+        if len(p["source"].get("text", "")) >= MIN_TEXT
+        and len(p["candidate"].get("text", "")) >= MIN_TEXT
+    ]
+    # Rank globally by similarity so the shared LLM budget is spent on the most
+    # relevant cross-policy pairs, regardless of which document they belong to.
+    evaluable.sort(key=lambda x: x["similarity"], reverse=True)
 
-        if llm_budget <= 0:
-            truncated = True
-            conflicting_docs.append({
-                "document_id": doc_id,
-                "document_title": doc_titles.get(doc_id, ""),
-                "conflicts": [],
-                "unchecked_candidate_count": len(limited_pairs),
-                "total_candidate_count": len(limited_pairs),
-            })
-            continue
+    total_candidates = len(all_pairs)
 
-        eval_result = _evaluate_pairs(limited_pairs, access_level, max_llm_calls=llm_budget)
-        calls_used = eval_result["llm_calls_used"]
-        llm_budget -= calls_used
-        total_llm_calls += calls_used
-        total_conflicts += len(eval_result["conflicts"])
+    # Two-pass: first take top pairs, then extract only the targets they reference
+    top_pairs = evaluable[:max_llm_calls]
 
-        if eval_result["unchecked"] > 0:
-            truncated = True
+    active_target_ids = {p["source"].get("id", "") for p in top_pairs}
+    active_targets = [c for c in target_doc_chunks if c.get("id", "") in active_target_ids]
+    if not active_targets:
+        active_targets = target_doc_chunks[:10]
 
+    eval_result = _evaluate_pairs(
+        top_pairs, access_level, max_llm_calls=max_llm_calls,
+        target_chunks=active_targets, target_doc_title=target_doc_title,
+    )
+    total_llm_calls = eval_result["llm_calls_used"]
+    total_conflicts = len(eval_result["conflicts"])
+    failed_calls = eval_result.get("failed_calls", 0)
+    min_eval_sim = min((p["similarity"] for p in top_pairs), default=0.0)
+
+    # Regroup the evaluated conflicts by the document they target.
+    docs_with_candidates = {p["candidate"].get("document_id", "") for p in all_pairs}
+    conflict_lookup = {}
+    for conflict in eval_result["conflicts"]:
+        did = conflict["clause_b"].get("document_id", "")
+        conflict_lookup.setdefault(did, []).append(conflict)
+
+    conflicting_docs = []
+    for doc_id in docs_with_candidates:
         conflicting_docs.append({
             "document_id": doc_id,
             "document_title": doc_titles.get(doc_id, ""),
-            "conflicts": eval_result["conflicts"],
-            "unchecked_candidate_count": eval_result["unchecked"],
-            "total_candidate_count": len(limited_pairs),
+            "conflicts": conflict_lookup.get(doc_id, []),
+            "unchecked_candidate_count": 0,
+            "total_candidate_count": sum(
+                1 for p in all_pairs if p["candidate"].get("document_id") == doc_id
+            ),
         })
-
     conflicting_docs.sort(key=lambda x: len(x.get("conflicts", [])), reverse=True)
+
+    # Inconclusive only when evaluation genuinely failed (e.g. LLM errors) on
+    # EVERY attempt, NOT because a lower-similarity candidate tail was left
+    # unevaluated.
+    successful_calls = total_llm_calls - failed_calls
+    genuinely_inconclusive = failed_calls > 0 and successful_calls == 0
 
     return {
         "conflicting_documents": conflicting_docs,
         "total_conflicts": total_conflicts,
         "total_llm_calls": total_llm_calls,
-        "truncated": truncated,
+        "total_candidates": total_candidates,
+        "evaluated_top_k": bool(top_pairs),
+        "evaluated_count": total_llm_calls,
+        "min_evaluated_similarity": min_eval_sim,
+        "genuine_failures": failed_calls,
+        "coverage_note": (
+            f"Evaluated the {len(top_pairs)} most similar cross-policy clause pairs."
+            if top_pairs else "No comparable cross-policy clauses were found."
+        ),
+        "truncated": genuinely_inconclusive,
+        "inconclusive": genuinely_inconclusive,
     }
 
 
@@ -638,7 +814,7 @@ def detect_conflicts_in_chunks(chunks: List[Dict[str, Any]]) -> List[Dict[str, A
     Strategy:
     1. Check Neo4j CONFLICTS_WITH relationships
     2. Detect version mismatches (same clause_ref across documents)
-    3. LLM-based pairwise conflict detection (top 5 pairs only)
+    3. Batch LLM conflict detection (single call)
     """
     all_conflicts = []
 
@@ -649,9 +825,6 @@ def detect_conflicts_in_chunks(chunks: List[Dict[str, Any]]) -> List[Dict[str, A
     version_conflicts = _detect_version_conflicts(chunks)
     all_conflicts.extend(version_conflicts)
 
-    # Rank cross-document pairs by retrieval similarity instead of comparing
-    # only the first few list positions. This preserves the call budget while
-    # giving the semantic checker the most relevant candidate pairs.
     candidate_pairs = []
     for i, a in enumerate(chunks):
         for b in chunks[i + 1:]:
@@ -661,23 +834,14 @@ def detect_conflicts_in_chunks(chunks: List[Dict[str, Any]]) -> List[Dict[str, A
                 float(a.get("similarity", 0.0) or 0.0),
                 float(b.get("similarity", 0.0) or 0.0),
             )
-            candidate_pairs.append((similarity, a, b))
+            candidate_pairs.append({"source": a, "candidate": b, "similarity": similarity})
 
-    llm_checked = 0
-    for similarity, a, b in sorted(candidate_pairs, reverse=True, key=lambda item: item[0])[:5]:
-        text_a = a.get("text", "")[:1200]
-        text_b = b.get("text", "")[:1200]
-        if len(text_a) < 50 or len(text_b) < 50:
-            continue
-        # Keep the legacy entry point compatible with callers that provide a
-        # text-only checker; the dedicated Clause-vs-Corpus pipeline passes
-        # full dictionaries and metadata.
-        llm_result = _llm_conflict_check(a.get("text", ""), b.get("text", ""))
-        llm_checked += 1
-        if llm_result.get("conflict"):
-            all_conflicts.append(_build_conflict_record(
-                a, b, similarity, {**llm_result, "source": "llm"},
-            ))
+    candidate_pairs.sort(key=lambda x: x["similarity"], reverse=True)
+    top_pairs = candidate_pairs[:15]
+
+    if top_pairs:
+        batch_conflicts = _batch_conflict_check(top_pairs, "Corpus")
+        all_conflicts.extend(batch_conflicts)
 
     return all_conflicts
 
@@ -826,9 +990,10 @@ def _build_semantic_conflict_record(clause_a: Dict[str, Any], clause_b: Dict[str
 def analyze_clause_vs_corpus(
     source_chunks: List[Dict[str, Any]],
     access_level: int,
-    candidate_retrieval_limit: int = 20,
+    query_text: str = "",
+    candidate_retrieval_limit: int = 30,
     minimum_conflict_targets: int = 3,
-    maximum_llm_comparisons: int = 15,
+    maximum_llm_comparisons: int = 65,
     threshold: float = 0.5,
 ) -> Dict[str, Any]:
     """Compare query-source clauses with accessible corpus candidates."""
@@ -872,29 +1037,37 @@ def analyze_clause_vs_corpus(
                 evidence.append(candidate)
             pairs.append({"source": source, "candidate": candidate, "similarity": float(candidate.get("similarity", 0.0) or 0.0)})
 
-    pairs.sort(key=lambda pair: pair["similarity"], reverse=True)
-    conflicts, checked, unchecked, llm_calls = [], 0, 0, 0
-    for pair in pairs:
-        if llm_calls >= maximum_llm_comparisons:
-            unchecked += 1
-            continue
-        source, candidate = pair["source"], pair["candidate"]
-        if len(source.get("text", "")) < 30 or len(candidate.get("text", "")) < 30:
-            unchecked += 1
-            continue
-        result = _validate_semantic_result(_llm_conflict_check(source, candidate), source, candidate)
-        llm_calls += 1
-        checked += 1
-        if result["status"] in {"confirmed_conflict", "possible_conflict", "superseded"}:
-            conflicts.append(_build_semantic_conflict_record(source, candidate, pair["similarity"], result))
+    MIN_TEXT = 30
+    evaluable = [
+        p for p in pairs
+        if len(p["source"].get("text", "")) >= MIN_TEXT
+        and len(p["candidate"].get("text", "")) >= MIN_TEXT
+    ]
+    evaluable.sort(key=lambda pair: pair["similarity"], reverse=True)
+    top_pairs = evaluable[:maximum_llm_comparisons]
 
-    unique = {}
-    for conflict in conflicts:
-        key = _canonical_pair_key(conflict["clause_a"], conflict["clause_b"])
-        previous = unique.get(key)
-        if previous is None or conflict.get("confidence", 0.0) > previous.get("confidence", 0.0):
-            unique[key] = conflict
-    conflicts = sorted(unique.values(), key=lambda item: (item.get("confidence", 0.0), item.get("scope_overlap", False), item.get("similarity", 0.0)), reverse=True)
+    if top_pairs:
+        label = f'Corpus (query: "{query_text}")' if query_text else "Corpus"
+        batch_conflicts = _batch_conflict_check(
+            top_pairs, label,
+        )
+        if batch_conflicts is None:
+            conflicts, checked, failed_calls, llm_calls = [], 0, 1, 1
+        else:
+            conflicts = []
+            for conflict in batch_conflicts:
+                key = _canonical_pair_key(conflict["clause_a"], conflict["clause_b"])
+                if key not in { _canonical_pair_key(c["clause_a"], c["clause_b"]) for c in conflicts }:
+                    conflicts.append(conflict)
+            conflicts = sorted(conflicts, key=lambda item: (item.get("confidence", 0.0), item.get("scope_overlap", False), item.get("similarity", 0.0)), reverse=True)
+            llm_calls = 1
+            checked = len(conflicts)
+            failed_calls = 0
+    else:
+        conflicts, checked, failed_calls, llm_calls = [], 0, 0, 0
+    evaluated_top_k = bool(top_pairs)
+    successful_calls = llm_calls - failed_calls
+    genuinely_inconclusive = failed_calls > 0 and successful_calls == 0
     return {
         "source_clauses": sources,
         "corpus_candidates": [c for c in evidence if c.get("origin") == "corpus_candidate"],
@@ -902,9 +1075,17 @@ def analyze_clause_vs_corpus(
         "conflicts": conflicts,
         "total_candidates": len(pairs),
         "checked_candidates": checked,
-        "unchecked_candidates": unchecked,
+        "evaluated_count": llm_calls,
+        "unchecked_candidates": 0,
+        "failed_calls": failed_calls,
+        "genuine_failures": failed_calls,
         "llm_calls": llm_calls,
-        "truncated": unchecked > 0,
-        "inconclusive": unchecked > 0,
+        "evaluated_top_k": evaluated_top_k,
+        "coverage_note": (
+            f"Evaluated the {len(top_pairs)} most similar cross-policy clause pairs."
+            if top_pairs else "No comparable cross-policy clauses were found."
+        ),
+        "truncated": genuinely_inconclusive,
+        "inconclusive": genuinely_inconclusive,
         "minimum_conflict_targets": minimum_conflict_targets,
     }

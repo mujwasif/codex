@@ -31,6 +31,7 @@ class QueryState(enum.Enum):
     VERIFIED = "verified"
     DONE = "done"
     ABSTAINED = "abstained"
+    AWAITING_SELECTION = "awaiting_selection"
 
 
 class QueryIntent(enum.Enum):
@@ -70,6 +71,15 @@ class QueryContext:
     risk_result: Optional[Dict[str, Any]] = None
     procedure_results: Optional[Dict[str, Any]] = None
 
+    # Document name resolution (filled by agent_resolve_docs)
+    resolved_documents: List[Dict[str, Any]] = field(default_factory=list)
+    resolved_doc_ids: List[str] = field(default_factory=list)
+    doc_slots: List[Dict[str, Any]] = field(default_factory=list)
+    doc_phrases: List[str] = field(default_factory=list)
+
+    # Conflict subtype (filled after doc resolution)
+    conflict_type: Optional[str] = None  # "type_1" | "type_2" | "type_2b"
+
     # Agent chain trace (recorded by run_pipeline)
     chain: List[Dict[str, Any]] = field(default_factory=list)
 
@@ -98,6 +108,10 @@ class QueryContext:
             "agents": self.chain,
             "chunks_found": len(self.chunks),
         }
+        if self.conflict_type:
+            reasoning["conflict_type"] = self.conflict_type
+        if self.resolved_documents:
+            reasoning["resolved_documents"] = self.resolved_documents
         if self.error:
             reasoning["error"] = self.error
         if self.approval_result:
@@ -126,51 +140,16 @@ class QueryContext:
             }
         return reasoning
 
-    def build_approval_answer(self) -> str:
-        """Prose answer for an approval intent, built from the graph result."""
-        if not self.approval_result:
-            return ""
-        res = self.approval_result
-        if res.get("error"):
-            return f"Approval resolution failed: {res['error']}"
-
-        process = res.get("process")
-        roles = res.get("matching_roles", [])
-        amount = res.get("amount")
-        user_can = res.get("user_can_approve", False)
-
-        lines = []
-        if process:
-            if roles:
-                lines.append(f"Approval authority for '{process}': {', '.join(roles)}.")
-            else:
-                lines.append(
-                    f"No approval process matching your question was found in the knowledge graph."
-                )
-            if amount:
-                lines.append(f"Requested amount: ${amount:,.2f}.")
-        if roles:
-            if user_can:
-                lines.append(
-                    f"Your role has sufficient authority to approve this action."
-                )
-            else:
-                lines.append(
-                    f"Approval from {', '.join(roles)} is required."
-                )
-        elif not process:
-            lines.append(
-                "The policy corpus does not define an approval chain for this action."
-            )
-        return " ".join(lines)
-
     def build_conflict_answer(self) -> str:
-        """Human-readable conflict answer with full detail and recommendations."""
+        """Conversational conflict answer with inline citations and recommendation."""
         if not self.conflicts:
             return ""
 
         count = len(self.conflicts)
-        lines = [f"I found {count} {'conflict' if count == 1 else 'conflicts'} between your policies:\n"]
+        if count == 1:
+            lines = ["I found a conflict between your policies:\n"]
+        else:
+            lines = [f"I found {count} conflicts between your policies:\n"]
 
         for i, c in enumerate(self.conflicts, 1):
             ca = c.get("clause_a", {})
@@ -183,45 +162,58 @@ class QueryContext:
             ref_b = cb.get("clause_ref", "") if isinstance(cb, dict) else ""
             text_a = ca.get("text", "") if isinstance(ca, dict) else ""
             text_b = cb.get("text", "") if isinstance(cb, dict) else ""
-            section_a = ca.get("section_path", "") if isinstance(ca, dict) else ""
-            section_b = cb.get("section_path", "") if isinstance(cb, dict) else ""
 
             topic = self._extract_topic(text_a, text_b, reason)
-            lines.append(f"{i}. **{topic}**")
+            lines.append(f"**{i}. {topic}**")
 
             if text_a and len(text_a) > 10:
-                snippet_a = text_a[:120].rstrip(".")
-                lines.append(f'   {title_a or "Document A"} says: "{snippet_a}."')
+                snippet_a = text_a[:150].rstrip(".")
+                citation_a = f" [Doc: {title_a}, Clause: {ref_a}]" if title_a and ref_a else ""
+                lines.append(f'The {title_a} states: "{snippet_a}."{citation_a}')
+
             if text_b and len(text_b) > 10:
-                snippet_b = text_b[:120].rstrip(".")
-                lines.append(f'   {title_b or "Document B"} says: "{snippet_b}."')
+                snippet_b = text_b[:150].rstrip(".")
+                citation_b = f" [Doc: {title_b}, Clause: {ref_b}]" if title_b and ref_b else ""
+                lines.append(f'However, the {title_b} says: "{snippet_b}."{citation_b}')
 
             if reason:
-                lines.append(f"   Conflict: {reason}.")
+                lines.append(f"These requirements contradict each other because {reason.lower().rstrip('.')}.")
 
             status = c.get("status", "confirmed_conflict")
             if status == "superseded":
-                lines.append("   Precedence: the available version metadata indicates that one requirement supersedes the other.")
+                lines.append("One version appears to supersede the other based on the available metadata.")
             elif status == "possible_conflict":
-                lines.append("   Uncertainty: the clauses may conflict, but the available metadata does not establish the outcome conclusively.")
-
-            src_parts = []
-            if title_a:
-                src_parts.append(f"{title_a} §{ref_a}" if ref_a else title_a)
-            if title_b:
-                src_parts.append(f"{title_b} §{ref_b}" if ref_b else title_b)
-            if src_parts:
-                lines.append(f"   Source: {' vs '.join(src_parts)}")
-            if title_a and ref_a:
-                lines.append(f"   Citation A: [Doc: {title_a}, Clause: {ref_a}]")
-            if title_b and ref_b:
-                lines.append(f"   Citation B: [Doc: {title_b}, Clause: {ref_b}]")
+                lines.append("These may conflict, but I'd need more context to confirm.")
 
             lines.append("")
 
-        if self.conflict_analysis.get("inconclusive"):
-            lines.append("Conflict analysis was inconclusive because some candidate clauses could not be evaluated.")
-        lines.append(self._build_conflict_recommendation())
+        # Conversational recommendation
+        doc_titles = set()
+        for c in self.conflicts:
+            ca = c.get("clause_a", {})
+            cb = c.get("clause_b", {})
+            if isinstance(ca, dict) and ca.get("document_title"):
+                doc_titles.add(ca["document_title"])
+            if isinstance(cb, dict) and cb.get("document_title"):
+                doc_titles.add(cb["document_title"])
+
+        if count == 1:
+            lines.append("I'd suggest reviewing this with the policy owners to align on one standard.")
+        else:
+            lines.append(
+                f"With {count} conflicts across your policies, it might be worth "
+                "scheduling an alignment review to resolve these inconsistencies."
+            )
+
+        if doc_titles:
+            lines.append(f"Documents involved: {', '.join(sorted(doc_titles))}.")
+
+        coverage_note = self.conflict_analysis.get("coverage_note")
+        if coverage_note:
+            lines.append(coverage_note)
+        elif self.conflict_analysis.get("inconclusive"):
+            lines.append("Note: some candidate clauses couldn't be fully evaluated due to a temporary service issue.")
+
         return "\n".join(lines)
 
     def _extract_topic(self, text_a: str, text_b: str, reason: str) -> str:
@@ -288,34 +280,47 @@ class QueryContext:
         return "\n".join(lines)
 
     def build_risk_answer(self) -> str:
-        """Prose answer for a compliance intent, built from the risk assessment."""
+        """Conversational compliance answer from the risk assessment."""
         if not self.risk_result:
             return ""
         res = self.risk_result
         verdict = res.get("verdict", "unknown")
-        risk_level = res.get("risk_level", "unknown")
         regulations = res.get("regulations", [])
         obligations = res.get("obligations", {})
         recommendations = res.get("recommendations", [])
+        elaboration = res.get("elaboration", "")
 
         lines = []
-        if verdict == "clear":
-            lines.append("No compliance issues detected.")
-        elif verdict == "conditional":
-            lines.append("Compliance is conditional — certain conditions must be satisfied.")
-        elif verdict == "violation":
-            lines.append("A policy/regulation violation was detected.")
-        elif verdict == "abstained":
-            lines.append("Insufficient policy basis to assess compliance.")
-        lines.append(f"Risk level: {risk_level}.")
+
+        if elaboration and elaboration != "No compliance issues detected.":
+            lines.append(elaboration)
+        else:
+            if verdict == "clear":
+                lines.append("No compliance issues detected in the retrieved clauses.")
+            elif verdict == "conditional":
+                lines.append("Compliance is conditional — certain conditions must be satisfied.")
+            elif verdict == "violation":
+                lines.append("A compliance issue was detected.")
+            elif verdict == "abstained":
+                lines.append("Insufficient policy context to assess compliance.")
+                return " ".join(lines)
 
         if regulations:
-            lines.append(f"Applicable regulations: {', '.join(regulations)}.")
+            lines.append(f"Applicable frameworks: {', '.join(regulations)}.")
+
         mandatory = sum(1 for v in obligations.values() if v == "mandatory")
         if mandatory:
-            lines.append(f"{mandatory} mandatory obligation(s) apply to the retrieved clauses.")
-        if recommendations:
-            lines.append("Recommended actions: " + "; ".join(recommendations) + ".")
+            lines.append(f"{mandatory} mandatory obligation(s) apply.")
+
+        actionable = [
+            r for r in recommendations
+            if not r.startswith("CRITICAL:")
+            and not r.startswith("NOTICE:")
+            and r != "No immediate compliance concerns detected"
+        ]
+        if actionable:
+            lines.append(" ".join(actionable))
+
         return " ".join(lines)
 
     def build_next_steps(self) -> List[str]:
@@ -404,133 +409,166 @@ def _is_bare_followup(question: str) -> bool:
 def classify_intent(
     question: str,
     prior_intent: Optional[QueryIntent] = None,
-) -> tuple[QueryIntent, float]:
+) -> tuple[QueryIntent, float, Optional[str], List[str]]:
     """
-    Classify the user's intent from their question using the LLM.
-    Falls back to deterministic keyword matching when the LLM is
-    unavailable or returns a low-confidence (< 0.7) result.
-    Returns (intent, confidence).
+    CoT classification: intent + conflict_type + document phrases.
+    Single LLM call with chain-of-thought. Returns
+    (intent, confidence, conflict_type, doc_phrases).
+
+    For CONFLICT intent, determines subtype:
+      0 docs → type_1, 1 doc → type_2b, 2+ docs → type_2
     """
-    # Bare follow-ups inherit the previous turn's intent (e.g. "for supplier
-    # termination?" after an approval question is still an approval question).
+    import json as _json
+
     if _is_bare_followup(question) and prior_intent is not None:
-        return prior_intent, 0.65
+        return prior_intent, 0.65, None, []
 
-    prompt = f"""Classify. Output: intent,confidence
+    VALID_INTENTS = {"approval", "conflict", "compliance", "procedure", "general", "conversational"}
 
-approval: approve,authorize,sign-off,approval limit,approval chain,who can,who approves,needs approval,requires approval,approval required,approval authority,who authorizes,who signs off,approval matrix,can approve,approval needed,escalate to,seek approval,get approval
-  "Who can approve a purchase over $10,000?" → approval,0.95
-  "Does the CFO need to sign off on budgets?" → approval,0.92
-  "What is my approval limit as a manager?" → approval,0.90
-  "Who authorizes travel requests?" → approval,0.93
-  "This expense needs director approval" → approval,0.91
-  "What is the approval chain for hiring?" → approval,0.89
-  "Can my supervisor approve overtime?" → approval,0.88
+    prompt = f"""Classify the user's question into one of 6 intents.
 
-conflict: conflict,contradict,inconsistency,inconsistent,versus,vs,override,supersedes,differs from,contrary to,version change,updated version,old version,new version,saying different things,clash,disagreement,mismatch
-  "These two policies contradict each other" → conflict,0.95
-  "Is there a conflict between v1 and v2?" → conflict,0.92
-  "The handbook says X but policy says Y" → conflict,0.90
-  "Which version overrides the other?" → conflict,0.91
-  "This clause differs from the old policy" → conflict,0.88
-  "Are there inconsistencies in these rules?" → conflict,0.89
+CRITICAL: The "intent" field MUST be exactly ONE of these 6 words (lowercase):
+  approval, conflict, compliance, procedure, general, conversational
 
-compliance: compliance,compliant,non-compliant,violation,breach,regulation,regulatory,gdpr,ndpa,iso 27001,nist,hipaa,sox,legal,law,standard,requirement,mandatory,penalty,fine,sanction,audit,obligation,must we,do we need,are we compliant,compliant with,mandatory requirement
-  "Are we GDPR compliant for data storage?" → compliance,0.95
-  "What happens if we violate security policy?" → compliance,0.92
-  "Is ISO 27001 mandatory for our team?" → compliance,0.93
-  "What are the penalties for non-compliance?" → compliance,0.91
-  "Do we need to follow this regulation?" → compliance,0.89
-  "Is this a legal requirement?" → compliance,0.90
-  "What are our audit obligations?" → compliance,0.88
+Conflict subtypes (only when intent is "conflict"):
+  type_1  — 0 document names → generic corpus search
+  type_2b — 1 document name  → that doc vs entire corpus
+  type_2  — 2+ document names → compare those specific docs
 
-procedure: how to,how do i,how can i,what is the process,procedure,steps,step by step,workflow,what should i,what should we,how often,when should,what happens if,what do i do,process for,steps to,walk me through,guide me,instructions
-  "How do I reset my password?" → procedure,0.95
-  "What are the steps for onboarding?" → procedure,0.93
-  "What should I do if I lose my badge?" → procedure,0.90
-  "Walk me through the incident response process" → procedure,0.92
-  "How often should passwords be changed?" → procedure,0.89
-  "What happens after I submit the form?" → procedure,0.87
-  "Guide me through the travel request process" → procedure,0.91
+---
 
-general: explain,tell me about,what is,what does,does the policy cover,can you explain,describe,summarize,i want to know,information about,overview,clarify
-  "Tell me about the remote work policy" → general,0.65
-  "What does the policy say about overtime?" → general,0.70
-  "Can you explain the dress code policy?" → general,0.68
-  "Give me an overview of security policies" → general,0.66
-  "I want to know about company benefits" → general,0.64
+# EXAMPLES (with reasoning)
 
-conversational: hello,hi,hey,thanks,thank you,bye,goodbye,good morning,good afternoon,good evening,how are you,what's up,ok,okay,sure,please,help
-  "Hello" → conversational,0.99
-  "Hi there" → conversational,0.99
-  "Thanks!" → conversational,0.99
-  "Good morning" → conversational,0.98
-  "Bye" → conversational,0.98
-  "How are you?" → conversational,0.97
+Q: "Check any conflict between backup policy and change management"
+→ Thinking: User names 2 policies and wants to check for conflicts.
+→ {{"intent":"conflict","confidence":0.95,"conflict_type":"type_2","doc_phrases":["backup policy","change management"]}}
 
-Question: {question}"""
+Q: "Compare the Backup Policy and the Data Retention Policy"
+→ Thinking: User names 2 policies and wants a comparison.
+→ {{"intent":"conflict","confidence":0.92,"conflict_type":"type_2","doc_phrases":["Backup Policy","Data Retention Policy"]}}
+
+Q: "Compare the BYOD Policy and the Remote Access Policy for gaps"
+→ Thinking: User names 2 policies and asks about gaps/differences.
+→ {{"intent":"conflict","confidence":0.91,"conflict_type":"type_2","doc_phrases":["BYOD Policy","Remote Access Policy"]}}
+
+Q: "How do the Clear Desk Policy and the Physical Security Policy differ?"
+→ Thinking: User names 2 policies and asks how they differ.
+→ {{"intent":"conflict","confidence":0.90,"conflict_type":"type_2","doc_phrases":["Clear Desk Policy","Physical Security Policy"]}}
+
+Q: "Does the Incident Response Plan conflict with anything?"
+→ Thinking: User names 1 policy and asks about conflicts with other policies.
+→ {{"intent":"conflict","confidence":0.93,"conflict_type":"type_2b","doc_phrases":["Incident Response Plan"]}}
+
+Q: "Are there password conflicts?"
+→ Thinking: User asks about a topic conflict but names no specific documents.
+→ {{"intent":"conflict","confidence":0.90,"conflict_type":"type_1","doc_phrases":[]}}
+
+Q: "Who can approve a purchase over $10,000?"
+→ Thinking: User asks about approval authority and monetary thresholds.
+→ {{"intent":"approval","confidence":0.95,"conflict_type":null,"doc_phrases":[]}}
+
+Q: "Are we compliant with data protection regulations?"
+→ Thinking: User asks whether a regulation or obligation exists.
+→ {{"intent":"compliance","confidence":0.92,"conflict_type":null,"doc_phrases":[]}}
+
+Q: "Is encryption of confidential data mandatory?"
+→ Thinking: User asks about a mandatory requirement under a regulation.
+→ {{"intent":"compliance","confidence":0.92,"conflict_type":null,"doc_phrases":[]}}
+
+Q: "Are backup integrity tests required?"
+→ Thinking: User asks whether a specific test is mandated.
+→ {{"intent":"compliance","confidence":0.90,"conflict_type":null,"doc_phrases":[]}}
+
+Q: "What is the tech sector tax classification?"
+→ Thinking: User asks about a regulatory classification.
+→ {{"intent":"compliance","confidence":0.88,"conflict_type":null,"doc_phrases":[]}}
+
+Q: "Summarize the BYOD Policy"
+→ Thinking: User wants a summary or overview of a specific policy. This is an informational query about one document.
+→ {{"intent":"procedure","confidence":0.92,"conflict_type":null,"doc_phrases":["BYOD Policy"]}}
+
+Q: "Give me an overview of the backup policy"
+→ Thinking: User wants an overview/summary of a policy.
+→ {{"intent":"procedure","confidence":0.90,"conflict_type":null,"doc_phrases":["Backup Policy"]}}
+
+Q: "What are the steps for the incident response process?"
+→ Thinking: User asks for step-by-step process from a specific plan.
+→ {{"intent":"procedure","confidence":0.93,"conflict_type":null,"doc_phrases":["Incident Response Plan"]}}
+
+Q: "How do I install new software on my work computer?"
+→ Thinking: User asks for a how-to procedure.
+→ {{"intent":"procedure","confidence":0.91,"conflict_type":null,"doc_phrases":[]}}
+
+Q: "Explain the change management process"
+→ Thinking: User wants an explanation of a process/procedure.
+→ {{"intent":"procedure","confidence":0.88,"conflict_type":null,"doc_phrases":["Change Management Policy"]}}
+
+Q: "What does the Backup Policy require?"
+→ Thinking: User asks a general question about a policy's content.
+→ {{"intent":"general","confidence":0.72,"conflict_type":null,"doc_phrases":["Backup Policy"]}}
+
+Q: "Hello"
+→ Thinking: User is greeting, no substantive question.
+→ {{"intent":"conversational","confidence":0.99,"conflict_type":null,"doc_phrases":[]}}
+
+---
+
+Q: "{question}"
+→ Thinking:"""
 
     result = llm_generate(
         model=QWEN3_8B_MODEL,
-        system_prompt="Classify questions into: approval, conflict, compliance, procedure, general, conversational",
+        system_prompt='Think step by step about the user intent. Output a "→ Thinking:" line with your reasoning, then output ONLY the JSON object. The "intent" field MUST be exactly one of: approval, conflict, compliance, procedure, general, conversational.',
         user_message=prompt,
         temperature=0.0,
-        max_tokens=15,
-        timeout=8.0,
+        max_tokens=2048,
+        timeout=12.0,
         enable_thinking=False
     )
 
+    intent_map = {
+        "approval": QueryIntent.APPROVAL,
+        "conflict": QueryIntent.CONFLICT,
+        "compliance": QueryIntent.COMPLIANCE,
+        "procedure": QueryIntent.PROCEDURE,
+        "general": QueryIntent.GENERAL,
+        "conversational": QueryIntent.CONVERSATIONAL,
+    }
+
     if result.success:
-        raw = result.data.strip().lower()
-        intent_map = {
-            "approval": QueryIntent.APPROVAL,
-            "conflict": QueryIntent.CONFLICT,
-            "compliance": QueryIntent.COMPLIANCE,
-            "procedure": QueryIntent.PROCEDURE,
-            "general": QueryIntent.GENERAL,
-            "conversational": QueryIntent.CONVERSATIONAL,
-        }
+        raw = result.data.strip()
+        raw = re.sub(r"<thinking>.*?</thinking>", "", raw, flags=re.DOTALL).strip()
+        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if json_match:
+            raw = json_match.group()
+        try:
+            parsed = _json.loads(raw)
+            if isinstance(parsed, list) and parsed:
+                parsed = parsed[0]
+            raw_intent = parsed.get("intent", "").lower().strip()
+            confidence = float(parsed.get("confidence", 0.5))
+            conflict_type = parsed.get("conflict_type")
+            doc_phrases = [str(p).strip() for p in parsed.get("doc_phrases", []) if p]
 
-        # Format 1: "procedure,0.95"
-        match = re.search(
-            r"(approval|conflict|compliance|procedure|general|conversational)[,:\-]\s*([\d.]+)",
-            raw
-        )
-        if match:
-            raw_intent = match.group(1)
-            try:
-                confidence = min(max(float(match.group(2)), 0.0), 1.0)
-            except ValueError:
-                confidence = None
-        else:
-            # Format 2: "intent: X" (or bare intent) with optional "confidence: high|medium|low"
-            intent_match = re.search(
-                r"(approval|conflict|compliance|procedure|general|conversational)", raw
-            )
-            conf_match = re.search(
-                r"confidence[\s:]*?(high|medium|low)", raw
-            )
-            raw_intent = intent_match.group(1) if intent_match else None
-            confidence = {
-                "high": 0.9,
-                "medium": 0.7,
-                "low": 0.4,
-            }.get(conf_match.group(1), 0.7) if conf_match else 0.7
+            # Validate: intent must be a known label, not hallucinated text
+            if raw_intent not in intent_map:
+                # Try to rescue: scan the raw output for a valid intent keyword
+                for kw in intent_map:
+                    if kw in raw.lower():
+                        raw_intent = kw
+                        break
 
-        if confidence is None:
-            confidence = 0.7
+            if raw_intent in intent_map:
+                return (
+                    intent_map[raw_intent],
+                    round(min(max(confidence, 0.0), 1.0), 4),
+                    conflict_type,
+                    doc_phrases,
+                )
+        except (_json.JSONDecodeError, ValueError, KeyError):
+            pass
 
-        if raw_intent:
-            if confidence >= 0.7:
-                return intent_map[raw_intent], round(confidence, 4)
-            # Low-confidence LLM result → cross-validate with keyword heuristic
-            kw_intent, kw_conf = _keyword_classify(question)
-            if kw_intent != QueryIntent.GENERAL:
-                return kw_intent, round(max(confidence, kw_conf), 4)
-            return intent_map[raw_intent], round(confidence, 4)
-
-    # Fallback: keyword matching when LLM unavailable or unparseable
-    return _keyword_classify(question)
+    return QueryIntent.GENERAL, 0.1, None, []
 
 
 # ═══════════════════════════════════════
@@ -542,6 +580,10 @@ def agent_retrieve(ctx: QueryContext):
     from services.api.search import search_policy
     from services.api.state import get_bm25_index
 
+    # Skip if agent_resolve_docs already populated chunks from resolved documents
+    if ctx.chunks and ctx.state == QueryState.RETRIEVED:
+        return
+
     # Use the user's raw question for retrieval so history augmentation can't
     # drown out the query's signal (e.g. a password question after unrelated
     # supplier/clear-desk turns retrieves password chunks, not supplier ones).
@@ -552,7 +594,7 @@ def agent_retrieve(ctx: QueryContext):
         query = ctx.question
 
     # Increase retrieval depth for procedures to capture all requirements
-    top_k = 100 if ctx.intent == QueryIntent.PROCEDURE else 20
+    top_k = 100 if ctx.intent == QueryIntent.PROCEDURE else (50 if ctx.intent == QueryIntent.CONFLICT else 20)
 
     try:
         ctx.chunks = search_policy(
@@ -567,16 +609,48 @@ def agent_retrieve(ctx: QueryContext):
         ctx.fail(f"Retrieval failed: {e}")
 
 
+def _format_approval_for_llm(result: dict) -> str:
+    """Format approval result for LLM context."""
+    if result.get("error"):
+        return f"Error: {result['error']}"
+    parts = []
+    if result.get("process"):
+        parts.append(f"Process: {result['process']}")
+    if result.get("matching_roles"):
+        parts.append(f"Approval authority: {', '.join(result['matching_roles'])}")
+    if result.get("amount"):
+        parts.append(f"Requested amount: ${result['amount']:,.0f}")
+    if result.get("user_can_approve"):
+        parts.append("User has authority to approve: Yes")
+    else:
+        parts.append("User has authority to approve: No")
+    if result.get("matching_processes"):
+        parts.append(f"Related processes: {', '.join(result['matching_processes'][:3])}")
+    if not parts:
+        parts.append("No matching approval process found in the knowledge graph.")
+    return "\n".join(parts)
+
+
 def agent_reason(ctx: QueryContext):
     """Generate grounded answer from retrieved chunks."""
     from services.agents.reasoner import generate_grounded_answer
 
     try:
-        # For approval intents the knowledge-graph answer is authoritative;
-        # keep it instead of regenerating a generic LLM answer from chunks.
-        if ctx.intent == QueryIntent.APPROVAL and ctx.answer.strip():
-            ctx.state = QueryState.REASONED
-            return
+        final_query = ctx.question
+
+        # For approval intents, inject the knowledge graph result into the
+        # question for the reasoner to generate a natural answer.
+        if ctx.intent == QueryIntent.APPROVAL and ctx.approval_result:
+            approval_text = _format_approval_for_llm(ctx.approval_result)
+            final_query = (
+                f"{ctx.raw_question or ctx.question}\n\n"
+                f"KNOWLEDGE GRAPH RESULT:\n{approval_text}\n\n"
+                f"Based on the knowledge graph result and any relevant policy "
+                f"context above, answer the user's question in a conversational "
+                f"tone. If the knowledge graph found a matching process, describe "
+                f"the approval chain. If no matching process was found, suggest "
+                f"checking with a manager or policy owner."
+            )
 
         # For conflict/compliance intents the specialized agent verdict is
         # the primary answer once its structured result is available.
@@ -589,16 +663,18 @@ def agent_reason(ctx: QueryContext):
                     return
             if ctx.conflict_analysis.get("inconclusive"):
                 ctx.answer = (
-                    "Conflict analysis was inconclusive because some candidate clauses "
-                    "could not be evaluated. No definitive absence of conflict can be reported."
+                    "Sorry, the conflict analysis service hit a temporary hiccup "
+                    "and couldn't complete this comparison. Give it another try in a moment."
                 )
                 ctx.state = QueryState.REASONED
                 return
             else:
+                coverage = ctx.conflict_analysis.get("coverage_note", "")
                 ctx.answer = (
-                    "I searched for conflicts across the relevant policy clauses "
-                    "and did not find any contradictory requirements. The clauses "
-                    "appear to be consistent with each other."
+                    "I compared the relevant policy clauses and everything looks "
+                    "consistent — no conflicting requirements found. The policies "
+                    "align well on this topic."
+                    + (f" {coverage}" if coverage else "")
                 )
                 ctx.state = QueryState.REASONED
                 return
@@ -610,7 +686,6 @@ def agent_reason(ctx: QueryContext):
                 return
 
         # Handle procedural results: enrich the question to force detailed listing
-        final_query = ctx.question
         if ctx.intent == QueryIntent.PROCEDURE and ctx.procedure_results:
             proc_data = ctx.procedure_results.get("processes", [])
             if proc_data:
@@ -668,6 +743,16 @@ def agent_verify(ctx: QueryContext):
 
         ctx.confidence = compute_confidence(ctx.chunks, is_valid, ctx.answer)
 
+        # Graph/elaboration-based answers (approval, compliance) are
+        # authoritative regardless of chunk citations — don't penalize.
+        if ctx.intent in (QueryIntent.APPROVAL, QueryIntent.COMPLIANCE):
+            if ctx.verdict == "clear":
+                ctx.confidence = max(ctx.confidence, 75.0)
+            elif ctx.verdict == "conditional":
+                ctx.confidence = max(ctx.confidence, 65.0)
+            elif ctx.verdict == "violation":
+                ctx.confidence = max(ctx.confidence, 80.0)
+
         # A verdict-driven confidence floor/ceiling: when we abstain (no policy
         # basis / no valid citations) the percentage must not masquerade as
         # high certainty — the original multi-signal score could reach ~89% on
@@ -688,49 +773,187 @@ def agent_approval(ctx: QueryContext):
         ctx.approval_result = resolve_approval(
             ctx.raw_question or ctx.question, ctx.chunks
         )
-        if ctx.approval_result:
-            # Surface the approval decision as the primary answer. The generic
-            # LLM reasoner runs afterwards; if it produces a cleaner grounded
-            # answer we keep that, otherwise the approval prose wins.
-            approval_answer = ctx.build_approval_answer()
-            if approval_answer and not ctx.answer:
-                ctx.answer = approval_answer
-            ctx.state = QueryState.REASONED
+        ctx.state = QueryState.REASONED
     except Exception as e:
         ctx.approval_result = {"error": str(e)}
 
 
 def agent_conflict_check(ctx: QueryContext):
-    """Check for conflicts between clauses (Type 1: clause-vs-corpus expansion)."""
+    """Unified conflict dispatcher — routes by subtype."""
+    if ctx.conflict_type == "type_2":
+        agent_conflict_type2(ctx)
+    elif ctx.conflict_type == "type_2b":
+        agent_conflict_type2b(ctx)
+    else:
+        agent_retrieve(ctx)
+        _run_clause_vs_corpus(ctx)
+
+
+def _run_clause_vs_corpus(ctx: QueryContext):
+    """Type 1: clause-vs-corpus expansion."""
     from services.agents.conflict_agent import analyze_clause_vs_corpus
 
     try:
         ctx.conflict_analysis = analyze_clause_vs_corpus(
             ctx.chunks,
             access_level=ctx.access_level,
-            candidate_retrieval_limit=20,
+            query_text=ctx.raw_question or ctx.question,
+            candidate_retrieval_limit=30,
             minimum_conflict_targets=3,
-            maximum_llm_comparisons=15,
+            maximum_llm_comparisons=65,
             threshold=0.5,
         )
-        # Citation verification and API persistence must see every clause that
-        # contributed evidence, not only the initial query retrieval.
+        ctx.conflict_analysis["type"] = ctx.conflict_type or "type_1"
+        ctx.conflict_analysis["evaluated_top_k"] = ctx.conflict_analysis.get("evaluated_top_k", False)
+        ctx.conflict_analysis["coverage_note"] = ctx.conflict_analysis.get("coverage_note", "")
+        ctx.conflict_analysis["genuine_failures"] = ctx.conflict_analysis.get("genuine_failures", 0)
         ctx.chunks = ctx.conflict_analysis.get("evidence", ctx.chunks)
         ctx.conflicts = ctx.conflict_analysis.get("conflicts", [])
         ctx.state = QueryState.REASONED
     except Exception as e:
         ctx.conflicts = []
         ctx.conflict_analysis = {
-            "status": "inconclusive",
-            "total_candidates": 0,
-            "checked_candidates": 0,
-            "unchecked_candidates": 0,
-            "llm_calls": 0,
-            "truncated": True,
-            "inconclusive": True,
-            "error": str(e),
+            "status": "inconclusive", "type": ctx.conflict_type or "type_1",
+            "total_candidates": 0, "checked_candidates": 0,
+            "unchecked_candidates": 0, "llm_calls": 0,
+            "truncated": True, "inconclusive": True, "error": str(e),
         }
         ctx.error = f"Conflict analysis failed: {e}"
+        ctx.state = QueryState.REASONED
+
+
+def agent_conflict_type2(ctx: QueryContext):
+    """Type 2: direct doc-vs-doc conflict comparison."""
+    from services.agents.conflict_agent import compare_document_chunks
+    from services.api.search import fetch_chunks_by_document
+
+    try:
+        chunks_by_doc = fetch_chunks_by_document(ctx.resolved_doc_ids, ctx.access_level)
+        if not chunks_by_doc:
+            ctx.fail("Could not fetch chunks for the resolved documents")
+            return
+
+        result = compare_document_chunks(
+            chunks_by_doc,
+            access_level=ctx.access_level,
+            similarity_threshold=0.5,
+            max_pairs=100,
+            max_llm_calls=65,
+        )
+
+        all_conflicts = []
+        for pair in result.get("doc_pairs", []):
+            all_conflicts.extend(pair.get("conflicts", []))
+
+        ctx.conflicts = all_conflicts
+        ctx.conflict_analysis = {
+            "status": "complete", "type": "type_2",
+            "total_candidates": result.get("total_candidates", 0),
+            "checked_candidates": result.get("total_llm_calls", 0),
+            "unchecked_candidates": 0,
+            "llm_calls": result.get("total_llm_calls", 0),
+            "truncated": result.get("truncated", False),
+            "inconclusive": result.get("failed_calls", 0) > 0 and result.get("total_llm_calls", 0) <= result.get("failed_calls", 0),
+        }
+        seen_ids: set[str] = set()
+        citation_chunks: list[Dict[str, Any]] = []
+        for conflict in all_conflicts:
+            for side in ("clause_a", "clause_b"):
+                clause = conflict.get(side, {})
+                cid = clause.get("id", "")
+                if cid and cid not in seen_ids:
+                    seen_ids.add(cid)
+                    citation_chunks.append({
+                        "id": cid,
+                        "document_id": clause.get("document_id", ""),
+                        "title": clause.get("document_title", ""),
+                        "clause_ref": clause.get("clause_ref", ""),
+                        "text": clause.get("text", ""),
+                        "score": conflict.get("similarity", 0.0),
+                    })
+        ctx.chunks = citation_chunks
+        ctx.state = QueryState.REASONED
+    except Exception as e:
+        ctx.conflicts = []
+        ctx.conflict_analysis = {
+            "status": "inconclusive", "type": "type_2",
+            "total_candidates": 0, "checked_candidates": 0,
+            "unchecked_candidates": 0, "llm_calls": 0,
+            "truncated": True, "inconclusive": True, "error": str(e),
+        }
+        ctx.state = QueryState.REASONED
+
+
+def agent_conflict_type2b(ctx: QueryContext):
+    """Type 2b: single doc-vs-corpus conflict check."""
+    from services.agents.conflict_agent import detect_conflicting_documents
+    from services.api.search import fetch_chunks_by_document
+
+    try:
+        doc_id = ctx.resolved_doc_ids[0]
+        chunks_by_doc = fetch_chunks_by_document([doc_id], ctx.access_level)
+        doc_chunks = chunks_by_doc.get(doc_id, [])
+        if not doc_chunks:
+            ctx.fail("Could not fetch chunks for the resolved document")
+            return
+
+        doc_title = doc_chunks[0].get("title", "") if doc_chunks else ""
+
+        result = detect_conflicting_documents(
+            target_doc_chunks=doc_chunks,
+            target_doc_id=doc_id,
+            target_doc_title=doc_title,
+            access_level=ctx.access_level,
+            similarity_threshold=0.7,
+            max_pairs=100,
+            max_llm_calls=65,
+        )
+
+        all_conflicts = []
+        for group in result.get("conflicting_documents", []):
+            all_conflicts.extend(group.get("conflicts", []))
+
+        ctx.conflicts = all_conflicts
+        ctx.conflict_analysis = {
+            "status": "complete" if not result.get("inconclusive") else "inconclusive",
+            "type": "type_2b",
+            "total_candidates": result.get("total_candidates", 0),
+            "checked_candidates": result.get("total_llm_calls", 0),
+            "evaluated_top_k": result.get("evaluated_top_k", False),
+            "coverage_note": result.get("coverage_note", ""),
+            "genuine_failures": result.get("genuine_failures", 0),
+            "unchecked_candidates": 0,
+            "llm_calls": result.get("total_llm_calls", 0),
+            "truncated": result.get("truncated", False),
+            "inconclusive": result.get("inconclusive", False),
+        }
+        # Citations = the OTHER-doc clauses from conflict pairs, not the
+        # entire source policy (which would just be self-referential junk).
+        seen_ids: set[str] = set()
+        citation_chunks: list[Dict[str, Any]] = []
+        for conflict in all_conflicts:
+            cb = conflict.get("clause_b", {})
+            cb_id = cb.get("id", "")
+            if cb_id and cb_id not in seen_ids:
+                seen_ids.add(cb_id)
+                citation_chunks.append({
+                    "id": cb_id,
+                    "document_id": cb.get("document_id", ""),
+                    "title": cb.get("document_title", ""),
+                    "clause_ref": cb.get("clause_ref", ""),
+                    "text": cb.get("text", ""),
+                    "score": conflict.get("similarity", 0.0),
+                })
+        ctx.chunks = citation_chunks
+        ctx.state = QueryState.REASONED
+    except Exception as e:
+        ctx.conflicts = []
+        ctx.conflict_analysis = {
+            "status": "inconclusive", "type": "type_2b",
+            "total_candidates": 0, "checked_candidates": 0,
+            "unchecked_candidates": 0, "llm_calls": 0,
+            "truncated": True, "inconclusive": True, "error": str(e),
+        }
         ctx.state = QueryState.REASONED
 
 
@@ -746,24 +969,32 @@ def agent_risk_compliance(ctx: QueryContext):
 
 
 def agent_conversational(ctx: QueryContext):
-    """Handle greetings, thanks, and casual conversation without retrieval."""
-    q = (ctx.raw_question or ctx.question).lower().strip().rstrip("?.!")
-    if q in ("hello", "hi", "hey", "hi there", "hey there"):
-        ctx.answer = "Hello! I'm Codex, your policy intelligence assistant. How can I help you today?"
-    elif "thank" in q:
-        ctx.answer = "You're welcome! Let me know if you have any other policy questions."
-    elif q in ("bye", "goodbye", "see you", "see ya"):
-        ctx.answer = "Goodbye! Feel free to come back anytime."
-    elif "good morning" in q:
-        ctx.answer = "Good morning! I'm Codex. What policy questions can I help you with?"
-    elif "good afternoon" in q:
-        ctx.answer = "Good afternoon! I'm Codex. What policy questions can I help you with?"
-    elif "good evening" in q:
-        ctx.answer = "Good evening! I'm Codex. What policy questions can I help you with?"
-    elif "how are you" in q:
-        ctx.answer = "I'm doing well, thank you! I'm here to help with any policy questions you might have."
+    """Handle greetings, thanks, and casual conversation via LLM."""
+    from services.agents.tools.llm_tools import llm_generate, QWEN3_8B_MODEL
+
+    result = llm_generate(
+        model=QWEN3_8B_MODEL,
+        system_prompt=(
+            "You are Codex, a friendly policy intelligence assistant. "
+            "The user's message includes a Conversation History section showing recent turns. "
+            "Use that context to respond naturally — reference prior answers if they mention them.\n"
+            "Rules: Be warm but concise (1-3 sentences). Greet back, acknowledge thanks, "
+            "redirect off-topic questions to policy topics. Never fabricate policy information. "
+            "Do not use emojis."
+        ),
+        user_message=ctx.question,
+        temperature=0.7,
+        max_tokens=600,
+        timeout=10.0,
+        enable_thinking=True,
+    )
+
+    if result.success:
+        answer = re.sub(r'<thinking>.*?</thinking>', '', result.data.strip(), flags=re.DOTALL).strip()
+        ctx.answer = answer or "Hi! I'm Codex. How can I help with policy questions today?"
     else:
-        ctx.answer = "Hi there! I'm Codex, your policy intelligence assistant. How can I help you today?"
+        ctx.answer = "Hi! I'm Codex. How can I help with policy questions today?"
+
     ctx.verdict = "clear"
     ctx.confidence = 1.0
     ctx.state = QueryState.REASONED
@@ -790,27 +1021,71 @@ def agent_procedure_reason(ctx: QueryContext):
         ctx.state = QueryState.RETRIEVED
 
 
+def agent_resolve_docs(ctx: QueryContext):
+    """Resolve document names using per-slot pgvector title search.
+
+    For conflict intents: shows top 5 candidates per slot, sets
+    AWAITING_SELECTION if user hasn't picked yet.
+    For other intents: resolves top 1 for context enrichment.
+    """
+    from services.api.search import resolve_documents_by_name
+
+    phrases = ctx.doc_phrases
+    if not phrases:
+        return
+
+    top_k = 5 if ctx.intent == QueryIntent.CONFLICT else 1
+
+    all_selected = []
+    for i, phrase in enumerate(phrases):
+        matches = resolve_documents_by_name(phrase, ctx.access_level, top_k=top_k, threshold=0.3)
+        if not matches:
+            continue
+
+        slot_candidates = []
+        for j, m in enumerate(matches):
+            slot_candidates.append({
+                "id": m["id"],
+                "title": m["title"],
+                "similarity": m["similarity"],
+                "selected": j == 0,
+            })
+
+        ctx.doc_slots.append({
+            "slot": i + 1,
+            "phrase": phrase,
+            "candidates": slot_candidates,
+        })
+
+        if slot_candidates:
+            top = slot_candidates[0]
+            all_selected.append(top)
+            ctx.resolved_doc_ids.append(top["id"])
+
+    ctx.resolved_documents = all_selected
+
+    if ctx.intent == QueryIntent.CONFLICT and ctx.conflict_type is None:
+        if len(ctx.resolved_doc_ids) == 1:
+            ctx.conflict_type = "type_2b"
+        elif len(ctx.resolved_doc_ids) >= 2:
+            ctx.conflict_type = "type_2"
+
+
 # ═══════════════════════════════════════
 #  Pipeline Definition
 # ═══════════════════════════════════════
 
-# Default pipeline: retrieve → reason → verify
 DEFAULT_PIPELINE = [agent_retrieve, agent_reason, agent_verify]
 
-# Intent-specific pipelines
 INTENT_PIPELINES = {
-    QueryIntent.APPROVAL: [agent_retrieve, agent_approval, agent_reason, agent_verify],
-    QueryIntent.CONFLICT: [agent_retrieve, agent_conflict_check, agent_reason, agent_verify],
-    QueryIntent.COMPLIANCE: [agent_retrieve, agent_risk_compliance, agent_reason, agent_verify],
-    QueryIntent.PROCEDURE: [agent_retrieve, agent_procedure_reason, agent_verify],
-    QueryIntent.GENERAL: DEFAULT_PIPELINE,
+    QueryIntent.APPROVAL: [agent_resolve_docs, agent_retrieve, agent_approval, agent_reason, agent_verify],
+    QueryIntent.CONFLICT: [agent_resolve_docs, agent_conflict_check, agent_reason, agent_verify],
+    QueryIntent.COMPLIANCE: [agent_resolve_docs, agent_retrieve, agent_risk_compliance, agent_reason, agent_verify],
+    QueryIntent.PROCEDURE: [agent_resolve_docs, agent_retrieve, agent_procedure_reason, agent_verify],
+    QueryIntent.GENERAL: [agent_resolve_docs, agent_retrieve, agent_reason, agent_verify],
     QueryIntent.CONVERSATIONAL: [agent_conversational],
 }
 
-
-# ═══════════════════════════════════════
-#  Orchestrator Entry Point
-# ═══════════════════════════════════════
 
 def run_pipeline(
     question: str,
@@ -820,14 +1095,16 @@ def run_pipeline(
     search_mode: str = "hybrid",
     raw_question: str = "",
     prior_intent: Optional[QueryIntent] = None,
+    selected_doc_ids: Optional[List[str]] = None,
 ) -> QueryContext:
     """
-    Run the full query pipeline through the state machine.
+    Two-phase query pipeline:
 
-    1. Classify intent
-    2. Select pipeline based on intent
-    3. Execute agents in sequence
-    4. Return enriched QueryContext
+    Phase 1 (no selected_doc_ids):
+      Classify intent → resolve docs → if type_2/2b, pause and return candidates
+
+    Phase 2 (with selected_doc_ids):
+      Run conflict analysis on user-selected documents
     """
     ctx = QueryContext(
         question=question,
@@ -839,19 +1116,50 @@ def run_pipeline(
     )
     ctx.start_timer()
 
-    # Step 1: Classify intent (on the raw question, not the history-augmented one)
-    ctx.intent, ctx.intent_confidence = classify_intent(
+    # Phase 2: User selected documents — run conflict analysis
+    if selected_doc_ids and prior_intent == QueryIntent.CONFLICT:
+        ctx.intent = QueryIntent.CONFLICT
+        ctx.intent_confidence = 1.0  # confirmed by user document selection
+        ctx.resolved_doc_ids = selected_doc_ids
+        ctx.state = QueryState.CLASSIFIED
+
+        # Determine conflict subtype from selection count
+        if len(selected_doc_ids) == 1:
+            ctx.conflict_type = "type_2b"
+        elif len(selected_doc_ids) >= 2:
+            ctx.conflict_type = "type_2"
+
+        pipeline = [agent_conflict_check, agent_reason, agent_verify]
+        for agent_fn in pipeline:
+            if ctx.state == QueryState.ABSTAINED:
+                break
+            agent_start = time.time()
+            agent_fn(ctx)
+            ctx.chain.append({
+                "agent": agent_fn.__name__,
+                "state": ctx.state.value,
+                "latency_ms": int((time.time() - agent_start) * 1000),
+                "output": ctx.verdict if agent_fn.__name__ == "agent_verify" else None,
+            })
+
+        if ctx.state != QueryState.ABSTAINED:
+            ctx.state = QueryState.DONE
+        ctx.stop_timer()
+        return ctx
+
+    # Phase 1: Classify intent + extract doc phrases (single CoT call)
+    ctx.intent, ctx.intent_confidence, ctx.conflict_type, ctx.doc_phrases = classify_intent(
         ctx.raw_question or ctx.question,
         prior_intent=prior_intent,
     )
     ctx.state = QueryState.CLASSIFIED
 
-    # Step 2: Select pipeline
+    # Select pipeline
     pipeline = INTENT_PIPELINES.get(ctx.intent, DEFAULT_PIPELINE)
 
-    # Step 3: Execute agents in sequence
+    # Execute agents
     for agent_fn in pipeline:
-        if ctx.state == QueryState.ABSTAINED:
+        if ctx.state in (QueryState.ABSTAINED, QueryState.AWAITING_SELECTION):
             break
         agent_start = time.time()
         agent_fn(ctx)
@@ -861,6 +1169,21 @@ def run_pipeline(
             "latency_ms": int((time.time() - agent_start) * 1000),
             "output": ctx.verdict if agent_fn.__name__ == "agent_verify" else None,
         })
+
+        # Pause after resolve_docs for type_2 and type_2b
+        if (agent_fn.__name__ == "agent_resolve_docs"
+                and ctx.state != QueryState.ABSTAINED
+                and ctx.intent == QueryIntent.CONFLICT
+                and ctx.conflict_type in ("type_2", "type_2b")
+                and not selected_doc_ids
+                and ctx.doc_slots):
+            ctx.verdict = "pending_selection"
+            ctx.answer = (
+                "I found matching documents for your conflict query. "
+                "Please select which documents you want to compare from the options below."
+            )
+            ctx.state = QueryState.AWAITING_SELECTION
+            break
 
     # Step 4: Final state
     if ctx.state != QueryState.ABSTAINED:

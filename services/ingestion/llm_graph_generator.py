@@ -1111,7 +1111,7 @@ def generate_graph_for_document(
     chunks: List[Dict],
     version: str = "v1",
     status: str = "active",
-    max_chunks_per_call: int = 60,
+    max_chunks_per_call: int = 40,
     access_level: int = 1,
 ) -> dict:
     """
@@ -1132,10 +1132,15 @@ def generate_graph_for_document(
         return backbone
 
     # Build chunk list text
+    # Budget: 16K context - 20% headroom - system(1500) - template(200) - output(4000)
+    # = ~7,400 tokens ≈ 29,600 chars for chunk text
+    CHUNK_TEXT_BUDGET_CHARS = 24000
+
     def _format_chunks(chunk_batch):
+        chars_per_chunk = max(200, CHUNK_TEXT_BUDGET_CHARS // max(len(chunk_batch), 1))
         lines = []
         for c in chunk_batch:
-            text_snippet = c["text"].strip().replace("\n", " ")[:250]
+            text_snippet = c["text"].strip().replace("\n", " ")[:chars_per_chunk]
             lines.append(
                 f'[{c.get("idx", 1)}] Clause "{c.get("clause_ref", "")}" '
                 f'(id: {c.get("chunk_id", "")}) — "{text_snippet}"'
@@ -1165,7 +1170,7 @@ def generate_graph_for_document(
                 {"role": "user", "content": user_message},
             ],
             "temperature": 0.0,
-            "max_tokens": 28000,
+            "max_tokens": 4000,
             "stream": False,
         }
 

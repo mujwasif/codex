@@ -51,7 +51,12 @@ def chat_completion(
         )
         response.raise_for_status()
         body = response.json()
-        return body["choices"][0]["message"]["content"].strip()
+        msg = body["choices"][0]["message"]
+        content = msg.get("content") or ""
+        # Hosted Qwen3 API puts output in 'reasoning' field, not 'content'
+        if not content.strip() and msg.get("reasoning"):
+            content = msg["reasoning"]
+        return content.strip()
     except LLMClientError:
         raise
     except (KeyError, IndexError, TypeError, ValueError) as exc:

@@ -58,6 +58,7 @@ class QueryCreate(BaseModel):
     question: str = Field(..., min_length=1, max_length=5000)
     intent: Optional[str] = None  # 'policy_lookup', 'approval_check', 'compliance'
     search_mode: Optional[str] = "hybrid"  # "vector" | "hybrid" | "bm25"
+    selected_doc_ids: Optional[List[str]] = None  # Phase 2: user-selected doc IDs for conflict analysis
 
 
 class QueryResponse(BaseModel):
@@ -86,6 +87,23 @@ class CitationResponse(BaseModel):
     quote: Optional[str] = None  # Exact source text (fetched from retrieved context)
 
 
+class ResolvedDoc(BaseModel):
+    """A document resolved from a natural-language name query."""
+
+    id: str
+    title: str
+    similarity: float
+    selected: bool = True
+
+
+class DocumentSlot(BaseModel):
+    """Per-slot document candidates for user selection."""
+
+    slot: int
+    phrase: str
+    candidates: List[ResolvedDoc]
+
+
 class AnswerResponse(BaseModel):
     id: str
     query_id: str
@@ -98,6 +116,8 @@ class AnswerResponse(BaseModel):
     search_mode: str = "hybrid"
     reasoning: Optional[Dict[str, Any]] = None  # Agent chain trace
     conflict_analysis: Optional["ConflictAnalysisResponse"] = None
+    resolved_documents: Optional[List[ResolvedDoc]] = None  # Selected docs
+    document_slots: Optional[List[DocumentSlot]] = None  # Per-slot candidates
     next_steps: List[str] = []  # Actionable recommendations
     missing: List[str] = []  # Required approvals/docs not satisfied
     created_at: str
@@ -251,6 +271,9 @@ class ConflictAnalysisResponse(BaseModel):
     llm_calls: int = 0
     truncated: bool = False
     inconclusive: bool = False
+    evaluated_top_k: bool = False
+    coverage_note: Optional[str] = None
+    genuine_failures: int = 0
 
 
 class ConflictCompareRequest(BaseModel):

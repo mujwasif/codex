@@ -275,6 +275,114 @@ def find_similar_clauses(
     return candidates[:top_k]
 
 
+def find_similar_in_document(
+    clause_text: str,
+    target_doc_id: str,
+    access_level: int = 3,
+    top_k: int = 10,
+    threshold: float = 0.5,
+) -> List[Dict]:
+    """Find similar clauses within a specific document only."""
+    query_vector = retriever.encode(clause_text).tolist()
+
+    with get_db_session() as session:
+        sql = text("""
+            SELECT
+                c.id, c.text, c.document_id, c.clause_ref,
+                c.section_path, d.title,
+                1 - (c.embedding <=> CAST(:embedding AS vector)) AS similarity
+            FROM chunks c
+            JOIN documents d ON c.document_id = d.id
+            WHERE c.document_id = :target_doc_id
+              AND d.ingestion_status = 'ready'
+              AND d.access_level <= :user_level
+            ORDER BY c.embedding <=> CAST(:embedding AS vector)
+            LIMIT :limit
+        """)
+        result = session.execute(sql, {
+            "embedding": str(query_vector),
+            "target_doc_id": target_doc_id,
+            "user_level": access_level,
+            "limit": top_k * 3,
+        })
+        candidates = []
+        for row in result:
+            sim = float(row.similarity)
+            if sim < threshold:
+                continue
+            candidates.append({
+                "id": str(row.id),
+                "text": row.text,
+                "document_id": str(row.document_id),
+                "clause_ref": row.clause_ref,
+                "section_path": row.section_path,
+                "title": row.title,
+                "similarity": sim,
+            })
+    return candidates[:top_k]
+
+
+def resolve_documents_by_name(
+    name_query: str,
+    access_level: int,
+    top_k: int = 5,
+    threshold: float = 0.3,
+) -> List[Dict]:
+    """
+    Resolve document names from a natural-language query using title embeddings.
+
+    Encodes the query with bge-large-en-v1.5 and runs cosine similarity
+    against stored title_embedding vectors in the documents table.
+
+    Args:
+        name_query: The full NL question or a document name fragment.
+        access_level: RBAC level filter (1=Standard, 2=Manager, 3=Admin).
+        top_k: Maximum documents to return.
+        threshold: Minimum cosine similarity (0.0-1.0). Titles are short,
+                   so the threshold is lower than chunk search (0.3 vs 0.7).
+
+    Returns:
+        List of {id, title, access_level, similarity} dicts, sorted descending.
+    """
+    query_vector = retriever.encode(name_query).tolist()
+
+    with get_db_session() as session:
+        sql = text("""
+            SELECT
+                d.id,
+                d.title,
+                d.access_level,
+                1 - (d.title_embedding <=> CAST(:embedding AS vector)) AS similarity
+            FROM documents d
+            WHERE d.ingestion_status = 'ready'
+              AND d.title_embedding IS NOT NULL
+              AND d.graph_ready_at IS NOT NULL
+              AND d.access_level <= :user_level
+            ORDER BY d.title_embedding <=> CAST(:embedding AS vector)
+            LIMIT :limit
+        """)
+        result = session.execute(
+            sql,
+            {
+                "embedding": str(query_vector),
+                "user_level": access_level,
+                "limit": max(top_k * 3, 30),
+            },
+        )
+        matches = []
+        for row in result:
+            sim = float(row.similarity)
+            if sim < threshold:
+                continue
+            matches.append({
+                "id": str(row.id),
+                "title": row.title,
+                "access_level": int(row.access_level) if row.access_level is not None else 1,
+                "similarity": sim,
+            })
+        return matches[:top_k]
+
+
 def fetch_chunks_by_document(
     doc_ids: List[str],
     access_level: int,
@@ -305,30 +413,30 @@ def fetch_chunks_by_document(
             .all()
         )
 
-    result: Dict[str, List[Dict]] = {}
-    for c in chunks:
-        doc_id = str(c.document_id)
-        result.setdefault(doc_id, []).append(
-            {
-                "id": str(c.id),
-                "text": c.text,
-                "document_id": doc_id,
-                "clause_ref": c.clause_ref,
-                "section_path": c.section_path,
-                "title": "",
-                "similarity": 0.0,
-            }
-        )
+        result: Dict[str, List[Dict]] = {}
+        for c in chunks:
+            doc_id = str(c.document_id)
+            result.setdefault(doc_id, []).append(
+                {
+                    "id": str(c.id),
+                    "text": c.text,
+                    "document_id": doc_id,
+                    "clause_ref": c.clause_ref,
+                    "section_path": c.section_path,
+                    "title": "",
+                    "similarity": 0.0,
+                }
+            )
 
-    titles = {}
-    docs = session.query(Document).filter(Document.id.in_(doc_ids)).all()
-    for d in docs:
-        titles[str(d.id)] = d.title
-    for chunks_list in result.values():
-        for chunk in chunks_list:
-            chunk["title"] = titles.get(chunk["document_id"], "")
+        titles = {}
+        docs = session.query(Document).filter(Document.id.in_(doc_ids)).all()
+        for d in docs:
+            titles[str(d.id)] = d.title
+        for chunks_list in result.values():
+            for chunk in chunks_list:
+                chunk["title"] = titles.get(chunk["document_id"], "")
 
-    return result
+        return result
 
 
 def build_cross_doc_candidates(

@@ -1,3 +1,4 @@
+import json
 import re
 from typing import List, Dict, Optional
 from services.ingestion.clause_detector import detect_clauses, get_clause_stats
@@ -6,9 +7,67 @@ from services.ingestion.clause_detector import detect_clauses, get_clause_stats
 MIN_CLAUSE_TOKENS = 10
 
 
+def _batch_detect_clauses(
+    sections_needing_llm: list,
+    all_sections: list,
+) -> dict:
+    """Send all LLM-needy sections in ONE API call. Returns {index: [clauses]}."""
+    from services.agents.tools.llm_tools import llm_generate, QWEN3_4B_MODEL
+
+    if not sections_needing_llm:
+        return {}
+
+    numbered_parts = []
+    for idx, sec in sections_needing_llm:
+        heading = " > ".join(sec.get("heading_hierarchy", []))
+        content = sec.get("content", "")
+        numbered_parts.append(f"[Section {idx + 1}] {heading}\n{content}")
+
+    batch_text = "\n\n---\n\n".join(numbered_parts)
+
+    prompt = f"""Split each numbered section below into individual rules/requirements.
+
+RULES:
+1. Each clause must be a single requirement or prohibition
+2. Keep all original wording — do not paraphrase
+3. If a section is already a single rule, return it as-is
+4. Use the section heading to understand context
+
+Return a JSON object mapping section numbers to clause arrays:
+{{"1": ["rule a", "rule b"], "5": ["rule c"]}}
+
+SECTIONS:
+{batch_text}
+"""
+
+    result = llm_generate(
+        model=QWEN3_4B_MODEL,
+        system_prompt="You are a policy document parser. Split each numbered section into rules. Output a JSON object mapping section numbers to arrays of clause strings in a ```json fenced block.",
+        user_message=prompt,
+        temperature=0.0,
+        max_tokens=4096,
+        timeout=180.0,
+    )
+
+    if not result.success:
+        return {}
+
+    content = result.data.strip()
+    try:
+        fenced = re.findall(r"```(?:json)?\s*(.*?)```", content, re.DOTALL)
+        json_str = fenced[-1].strip() if fenced else content
+        parsed = json.loads(json_str)
+        out = {}
+        for k, v in parsed.items():
+            if isinstance(v, list):
+                out[int(k) - 1] = [c for c in v if isinstance(c, str) and c.strip()]
+        return out
+    except (json.JSONDecodeError, ValueError, KeyError):
+        return {}
+
+
 def chunk_document_clauses(
     sections: List[Dict],
-    llama_url: Optional[str] = None,
     max_clause_tokens: int = 50,
     overlap_tokens: int = 3,
     use_llm: bool = True
@@ -23,7 +82,6 @@ def chunk_document_clauses(
     
     Args:
         sections: List of sections from doc_parser
-        llama_url: llama.cpp server URL for LLM clause detection
         max_clause_tokens: Maximum tokens per clause (default 50)
         overlap_tokens: Number of tokens to overlap between clauses (default 3)
         use_llm: Whether to use LLM for clause detection (default True)
@@ -31,14 +89,26 @@ def chunk_document_clauses(
     Returns:
         List of clause-level chunks with metadata
     """
-    if use_llm and llama_url is None:
-        llama_url = None
-
     chunks = []
     clause_counter = {}
     prev_tail = ""
 
-    for section in sections:
+    non_heading_sections = [s for s in sections if not s.get('is_heading', False)]
+
+    # Pre-compute which sections need LLM (>300 chars)
+    llm_batch = []
+    if use_llm and non_heading_sections:
+        for i, sec in enumerate(non_heading_sections):
+            content = sec.get("content", "")
+            if len(content.strip()) >= 300:
+                llm_batch.append((i, sec))
+
+    # ONE LLM call for all sections that need splitting
+    llm_results = {}
+    if llm_batch:
+        llm_results = _batch_detect_clauses(llm_batch, non_heading_sections)
+
+    for idx, section in enumerate(sections):
         if section.get('is_heading', False):
             continue
 
@@ -51,7 +121,12 @@ def chunk_document_clauses(
         if not content.strip():
             continue
 
-        clauses = detect_clauses(content, llama_url, use_llm)
+        # Use batch result if available, else single-section fallback
+        current_pos = non_heading_sections.index(section) if section in non_heading_sections else 0
+        if current_pos in llm_results and llm_results[current_pos]:
+            clauses = llm_results[current_pos]
+        else:
+            clauses = [content.strip()]
 
         if section_path not in clause_counter:
             clause_counter[section_path] = 0

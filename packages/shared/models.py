@@ -24,6 +24,7 @@ class Document(Base):
     source_uri = Column(Text)
     access_tags = Column(JSON, default=[])
     access_level = Column(Integer, default=1)
+    title_embedding = Column(Vector(1024))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

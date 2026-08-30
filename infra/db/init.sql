@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS documents (
     source_uri TEXT,
     access_tags JSONB DEFAULT '[]',
     access_level INTEGER DEFAULT 1,
+    title_embedding vector(1024),
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
 );

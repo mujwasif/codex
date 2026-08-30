@@ -71,29 +71,41 @@ def llm_generate(
         payload["thinking_budget_tokens"] = thinking_budget_tokens
     if enable_thinking is not None:
         payload["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
-    try:
-        session = ConnectionPool.get_http()
-        request_model = LLM_INGESTION_MODEL if model.lower() in AGENT_8081_MODELS else LLM_MODEL
-        content = chat_completion(
-            model=request_model,
-            messages=payload["messages"],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout
-        )
-        return ToolResult(
-            success=True,
-            data=content,
-            latency_ms=int((time.time() - start) * 1000),
-            tool_name="llm_generate"
-        )
-    except Exception as e:
-        return ToolResult(
-            success=False,
-            error=str(e),
-            latency_ms=int((time.time() - start) * 1000),
-            tool_name="llm_generate"
-        )
+    MAX_RETRIES = 3
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            session = ConnectionPool.get_http()
+            request_model = LLM_INGESTION_MODEL if model.lower() in AGENT_8081_MODELS else LLM_MODEL
+            extra = {}
+            if "chat_template_kwargs" in payload:
+                extra["chat_template_kwargs"] = payload["chat_template_kwargs"]
+            if "thinking_budget_tokens" in payload:
+                extra["thinking_budget_tokens"] = payload["thinking_budget_tokens"]
+            content = chat_completion(
+                model=request_model,
+                messages=payload["messages"],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                extra=extra if extra else None,
+            )
+            return ToolResult(
+                success=True,
+                data=content,
+                latency_ms=int((time.time() - start) * 1000),
+                tool_name="llm_generate"
+            )
+        except Exception as e:
+            if attempt < MAX_RETRIES:
+                backoff = min(2 ** attempt, 8)
+                time.sleep(backoff)
+            else:
+                return ToolResult(
+                    success=False,
+                    error=str(e),
+                    latency_ms=int((time.time() - start) * 1000),
+                    tool_name="llm_generate"
+                )
 
 
 def llm_generate_json(

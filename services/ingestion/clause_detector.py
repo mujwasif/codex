@@ -116,7 +116,7 @@ def _normalize_clause(clause: str) -> str:
     return cleaned.strip()
 
 
-def detect_clauses_llm(text: str, llama_url: str = None) -> List[str]:
+def detect_clauses_llm(text: str, all_sections: list = None, current_index: int = 0) -> List[str]:
     """
     Use Qwen3-4B-Instruct to split a section into individual clauses.
 
@@ -125,12 +125,52 @@ def detect_clauses_llm(text: str, llama_url: str = None) -> List[str]:
 
     Args:
         text: Section content to split
-        llama_url: llama.cpp server URL (unused — model is routed by llm_generate)
+        all_sections: Full list of parsed sections (for document context)
+        current_index: Index of the current section in all_sections
 
     Returns:
         List of clause strings
     """
-    prompt = f"""Split this policy section into individual rules/requirements.
+    context_block = ""
+    if all_sections and len(all_sections) > 1:
+        # Sliding window: show ±10 sections around current (max 21 total)
+        # Prevents token blowup for large docs with 100+ sections
+        WINDOW = 5
+        start = max(0, current_index - WINDOW)
+        end = min(len(all_sections), current_index + WINDOW + 1)
+        visible_sections = list(enumerate(all_sections))[start:end]
+        total_visible = len(visible_sections)
+        total_chars_budget = 30000
+        chars_per_section = max(400, total_chars_budget // max(total_visible, 1))
+
+        context_parts = []
+        for i, sec in visible_sections:
+            heading = " > ".join(sec.get("heading_hierarchy", []))
+            sec_text = sec.get("content", "")
+            if i == current_index:
+                marker = ">>> [CURRENT — split this section into clauses]:"
+                sec_text = text
+            else:
+                marker = ""
+                sec_text = sec_text[:chars_per_section]
+            label = f"[Section {i + 1}/{len(all_sections)}]"
+            context_parts.append(f"{label} {heading}\n{marker}\n{sec_text}")
+        context_block = "\n\n".join(context_parts)
+
+    if context_block:
+        prompt = f"""Split this policy section into individual rules/requirements.
+
+FULL DOCUMENT CONTEXT (for reference — only split the CURRENT section marked with >>>):
+{context_block}
+
+RULES:
+1. Each clause must be a single requirement or prohibition
+2. Keep all original wording - do not paraphrase
+3. If the text is already a single rule, return it as-is in a JSON array
+4. Use surrounding sections only to resolve ambiguous pronouns or references
+{_COT_RULE}"""
+    else:
+        prompt = f"""Split this policy section into individual rules/requirements.
 
 RULES:
 1. Each clause must be a single requirement or prohibition
@@ -180,11 +220,12 @@ TEXT:
 
 def detect_clauses(
     text: str, 
-    llama_url: Optional[str] = None,
-    use_llm: bool = True
+    use_llm: bool = True,
+    all_sections: list = None,
+    current_index: int = 0,
 ) -> List[str]:
     """
-    Detect clauses using LLM only.
+    Detect clauses using LLM.
     
     Logic:
     1. Try LLM for clause detection
@@ -192,8 +233,9 @@ def detect_clauses(
     
     Args:
         text: Section content to split
-        llama_url: llama.cpp server URL
         use_llm: Whether to use LLM
+        all_sections: Full list of parsed sections (for document context)
+        current_index: Index of the current section in all_sections
         
     Returns:
         List of clause strings
@@ -201,11 +243,14 @@ def detect_clauses(
     if not text or not text.strip():
         return []
     
-    # Step 1: Try LLM
-    if use_llm and llama_url is None:
-        llama_url = None
-    if use_llm and llama_url:
-        llm_clauses = detect_clauses_llm(text, llama_url)
+    # Short-circuit: small sections are single rules — skip LLM
+    # A section needs ~300+ chars to potentially contain multiple rules
+    if len(text.strip()) < 300:
+        return [text.strip()]
+    
+    # Step 1: Try LLM clause detection
+    if use_llm:
+        llm_clauses = detect_clauses_llm(text, all_sections=all_sections, current_index=current_index)
         if llm_clauses:
             return llm_clauses
     
