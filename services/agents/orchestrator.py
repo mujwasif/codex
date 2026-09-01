@@ -846,8 +846,8 @@ def _run_clause_vs_corpus(ctx: QueryContext):
             query_text=ctx.raw_question or ctx.question,
             candidate_retrieval_limit=30,
             minimum_conflict_targets=3,
-            maximum_llm_comparisons=65,
-            threshold=0.5,
+            maximum_llm_comparisons=200,
+            threshold=0.6,
         )
         ctx.conflict_analysis["type"] = ctx.conflict_type or "type_1"
         ctx.conflict_analysis["evaluated_top_k"] = ctx.conflict_analysis.get("evaluated_top_k", False)
@@ -882,9 +882,10 @@ def agent_conflict_type2(ctx: QueryContext):
         result = compare_document_chunks(
             chunks_by_doc,
             access_level=ctx.access_level,
-            similarity_threshold=0.5,
-            max_pairs=100,
-            max_llm_calls=65,
+            similarity_threshold=0.6,
+            max_pairs=200,
+            max_llm_calls=200,
+            question=ctx.raw_question or ctx.question,
         )
 
         all_conflicts = []
@@ -950,9 +951,10 @@ def agent_conflict_type2b(ctx: QueryContext):
             target_doc_id=doc_id,
             target_doc_title=doc_title,
             access_level=ctx.access_level,
-            similarity_threshold=0.7,
-            max_pairs=100,
-            max_llm_calls=65,
+            similarity_threshold=0.6,
+            max_pairs=200,
+            max_llm_calls=200,
+            question=ctx.raw_question or ctx.question,
         )
 
         all_conflicts = []

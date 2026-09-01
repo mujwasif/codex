@@ -281,9 +281,9 @@ class ConflictCompareRequest(BaseModel):
 
     document_ids: Optional[List[str]] = Field(None, min_length=2, max_length=3)
     document_names: Optional[List[str]] = Field(None, min_length=2, max_length=3)
-    similarity_threshold: float = Field(0.7, ge=0.0, le=1.0)
-    max_pairs: int = Field(100, ge=1, le=500)
-    max_llm_calls: int = Field(15, ge=1, le=50)
+    similarity_threshold: float = Field(0.6, ge=0.0, le=1.0)
+    max_pairs: int = Field(200, ge=1, le=500)
+    max_llm_calls: int = Field(100, ge=1, le=200)
 
 
 class DocumentConflictGroup(BaseModel):
@@ -303,7 +303,7 @@ class ConflictCompareResponse(BaseModel):
     total_conflicts: int = 0
     total_candidates: int = 0
     total_llm_calls: int = 0
-    similarity_threshold: float = 0.7
+    similarity_threshold: float = 0.6
     truncated: bool = False
 
 
@@ -315,7 +315,7 @@ class DocumentConflictsResponse(BaseModel):
     conflicting_documents: List[DocumentConflictGroup] = []
     total_conflicts: int = 0
     total_llm_calls: int = 0
-    similarity_threshold: float = 0.7
+    similarity_threshold: float = 0.6
     truncated: bool = False
 
 

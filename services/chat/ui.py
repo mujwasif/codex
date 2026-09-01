@@ -759,17 +759,34 @@ def render_conflicts(conflicts):
         return
     rows = []
     for c in conflicts:
-        ref_a = c.get("ref") or c.get("clause_a") or "unknown"
-        ref_b = c.get("clause_b")
-        reason = c.get("reason") or "contradiction found"
-        source = c.get("source", "")
-        where = str(ref_a)
-        if ref_b:
-            where += f" ↔ {str(ref_b)}"
-        row = f'<div class="cite-row"><span style="color:#721c24;">⚠ {html.escape(where)}</span>'
-        row += f' &mdash; {html.escape(str(reason))}'
-        if source:
-            row += f' <span style="color:#555;">(source: {html.escape(str(source))})</span>'
+        ca = c.get("clause_a", {}) if isinstance(c.get("clause_a"), dict) else {}
+        cb = c.get("clause_b", {}) if isinstance(c.get("clause_b"), dict) else {}
+
+        title_a = ca.get("document_title", "Doc A")
+        ref_a = ca.get("clause_ref", "?")
+        title_b = cb.get("document_title", "Doc B")
+        ref_b = cb.get("clause_ref", "?")
+        reason = c.get("reason", "contradiction found")
+        status = c.get("status", "")
+        subject = c.get("subject", "")
+
+        status_style = "color:#721c24" if status == "confirmed_conflict" else "color:#856404"
+        status_label = "Conflict" if status == "confirmed_conflict" else "Possible Conflict"
+
+        header = f"{html.escape(title_a)} §{html.escape(str(ref_a))} ↔ {html.escape(title_b)} §{html.escape(str(ref_b))}"
+        if subject:
+            header = f"<b>{html.escape(str(subject))}</b>: {header}"
+
+        row = f'<div class="cite-row"><span style="{status_style};">⚠ {status_label} {header}</span>'
+        row += f'<br>{html.escape(str(reason))}'
+
+        text_a = ca.get("text", "")
+        text_b = cb.get("text", "")
+        if text_a:
+            row += f'<br><i>"{html.escape(text_a[:120])}"</i> [{html.escape(title_a)} §{html.escape(str(ref_a))}]'
+        if text_b:
+            row += f'<br><i>"{html.escape(text_b[:120])}"</i> [{html.escape(title_b)} §{html.escape(str(ref_b))}]'
+
         row += "</div>"
         rows.append(row)
     st.markdown(
@@ -1193,7 +1210,7 @@ def _verdict_class(verdict):
     return "verdict-abstained"
 
 
-def _render_bubble(msg):
+def _render_bubble(msg, msg_index=0):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
@@ -1242,7 +1259,7 @@ def _render_bubble(msg):
                 if doc_slots:
                     st.markdown("---")
                     st.markdown("**Select documents to compare:**")
-                    slot_key_prefix = f"slot_{hash(msg.get('content', '')[:50])}"
+                    slot_key_prefix = f"slot_{msg_index}"
                     selected_ids = []
                     for slot in doc_slots:
                         phrase = slot.get("phrase", "")
@@ -1345,8 +1362,8 @@ def render_assistant_tab():
         st.rerun()
 
     with st.container(height=500, autoscroll=True, key="chat_transcript"):
-        for msg in st.session_state.messages:
-            _render_bubble(msg)
+        for msg_idx, msg in enumerate(st.session_state.messages):
+            _render_bubble(msg, msg_index=msg_idx)
 
         if st.session_state.pending:
             with st.chat_message("assistant"):
