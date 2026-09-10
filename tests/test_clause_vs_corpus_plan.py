@@ -61,21 +61,9 @@ class ClauseVsCorpusPlanTests(unittest.TestCase):
         }.get(clause_text, [])
 
         batch_conflicts = [
-            {"target_id": "tc1", "candidate_id": "cc1", "status": "confirmed_conflict",
-             "subject": "password expiration", "confidence": 0.95,
-             "reason": "Both clauses impose incompatible mandatory periods.",
-             "source_requirement": "90 days", "candidate_requirement": "60 days",
-             "difference_type": "threshold", "scope_overlap": True},
-            {"target_id": "tc2", "candidate_id": "cc2", "status": "confirmed_conflict",
-             "subject": "record retention", "confidence": 0.91,
-             "reason": "Both clauses impose incompatible retention periods.",
-             "source_requirement": "7 years", "candidate_requirement": "3 years",
-             "difference_type": "threshold", "scope_overlap": True},
-            {"target_id": "tc3", "candidate_id": "cc3", "status": "confirmed_conflict",
-             "subject": "training", "confidence": 0.88,
-             "reason": "The requirements specify incompatible periods.",
-             "source_requirement": "90 days", "candidate_requirement": "12 months",
-             "difference_type": "time", "scope_overlap": True},
+            {"target_id": "T0", "candidate_id": "C0", "reason": "Both clauses impose incompatible mandatory periods.", "confidence": 0.95},
+            {"target_id": "T1", "candidate_id": "C1", "reason": "Both clauses impose incompatible retention periods.", "confidence": 0.91},
+            {"target_id": "T2", "candidate_id": "C2", "reason": "The requirements specify incompatible periods.", "confidence": 0.88},
         ]
         llm_gen.return_value = _make_batch_response(batch_conflicts)
 
@@ -104,11 +92,7 @@ class ClauseVsCorpusPlanTests(unittest.TestCase):
         find_similar.return_value = CANDIDATES
 
         llm_gen.return_value = _make_batch_response([
-            {"target_id": "tc1", "candidate_id": "cc1", "status": "confirmed_conflict",
-             "subject": "password", "confidence": 0.95,
-             "reason": "Contradictory mandatory periods.",
-             "source_requirement": "90 days", "candidate_requirement": "60 days",
-             "difference_type": "threshold", "scope_overlap": True},
+            {"target_id": "T0", "candidate_id": "C0", "reason": "Contradictory mandatory periods.", "confidence": 0.95},
         ])
 
         result = analyze_clause_vs_corpus([SOURCE], access_level=1, maximum_llm_comparisons=1)

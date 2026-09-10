@@ -479,6 +479,22 @@ Q: "Are there password conflicts?"
 → Thinking: User asks about a topic conflict but names no specific documents.
 → {{"intent":"conflict","confidence":0.90,"conflict_type":"type_1","doc_phrases":[]}}
 
+Q: "Our policy requires passwords to be changed every 90 days. Does this conflict with any other policy?"
+→ Thinking: User states a specific requirement and asks if other policies contradict it. No specific document named — this is a type_1 topic-level conflict search.
+→ {{"intent":"conflict","confidence":0.93,"conflict_type":"type_1","doc_phrases":[]}}
+
+Q: "We require VPN for all remote employees. Is this consistent across policies?"
+→ Thinking: User describes a requirement and asks about consistency across all policies. This is a conflict/consistency check across the corpus.
+→ {{"intent":"conflict","confidence":0.91,"conflict_type":"type_1","doc_phrases":[]}}
+
+Q: "Do any of our policies contradict the requirement for annual security training?"
+→ Thinking: User asks whether any policy contradicts a specific requirement. No documents named — type_1 corpus search.
+→ {{"intent":"conflict","confidence":0.92,"conflict_type":"type_1","doc_phrases":[]}}
+
+Q: "Is the 90-day password rotation requirement consistent across all policies?"
+→ Thinking: User asks whether a specific requirement is consistent across all policies. This is a conflict/consistency check.
+→ {{"intent":"conflict","confidence":0.90,"conflict_type":"type_1","doc_phrases":[]}}
+
 Q: "Who can approve a purchase over $10,000?"
 → Thinking: User asks about approval authority and monetary thresholds.
 → {{"intent":"approval","confidence":0.95,"conflict_type":null,"doc_phrases":[]}}
@@ -847,7 +863,7 @@ def _run_clause_vs_corpus(ctx: QueryContext):
             candidate_retrieval_limit=30,
             minimum_conflict_targets=3,
             maximum_llm_comparisons=200,
-            threshold=0.6,
+            threshold=0.57,
         )
         ctx.conflict_analysis["type"] = ctx.conflict_type or "type_1"
         ctx.conflict_analysis["evaluated_top_k"] = ctx.conflict_analysis.get("evaluated_top_k", False)
@@ -882,7 +898,7 @@ def agent_conflict_type2(ctx: QueryContext):
         result = compare_document_chunks(
             chunks_by_doc,
             access_level=ctx.access_level,
-            similarity_threshold=0.6,
+            similarity_threshold=0.57,
             max_pairs=200,
             max_llm_calls=200,
             question=ctx.raw_question or ctx.question,
@@ -951,7 +967,7 @@ def agent_conflict_type2b(ctx: QueryContext):
             target_doc_id=doc_id,
             target_doc_title=doc_title,
             access_level=ctx.access_level,
-            similarity_threshold=0.6,
+            similarity_threshold=0.57,
             max_pairs=200,
             max_llm_calls=200,
             question=ctx.raw_question or ctx.question,
