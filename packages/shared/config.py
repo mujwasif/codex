@@ -44,6 +44,11 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/"
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
 LLM_INGESTION_MODEL = os.getenv("LLM_INGESTION_MODEL", LLM_MODEL)
 
+# ── Backup LLM ────────────────────────────────────────────────
+LLM_BACKUP_BASE_URL = os.getenv("LLM_BACKUP_BASE_URL", "")
+LLM_BACKUP_API_KEY = os.getenv("LLM_BACKUP_API_KEY", "")
+LLM_BACKUP_MODEL = os.getenv("LLM_BACKUP_MODEL", "")
+
 
 def get_llm_provider() -> str:
     """Return the only supported hosted LLM provider."""

@@ -4,7 +4,7 @@ from typing import List, Dict, Optional
 from services.ingestion.clause_detector import detect_clauses, get_clause_stats
 
 
-MIN_CLAUSE_TOKENS = 10
+MIN_CLAUSE_TOKENS = 20
 
 
 def _batch_detect_clauses(

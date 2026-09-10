@@ -268,10 +268,9 @@ INGESTION_STAGES = ["pending", "processing", "chunks_ready", "graph_building", "
 
 
 @st.fragment(run_every=5)
-def render_live_ingestion_feed(token):
-    """Terminal-style live feed of the ingestion worker output. Auto-refreshes every 5s."""
-    data = fetch_ingestion_status(token)
-    tail = (data.get("log_tail") or "").strip() if data else ""
+def render_live_ingestion_feed_from_data(status_data):
+    """Terminal-style live feed from already-fetched status data. No extra API call."""
+    tail = (status_data.get("log_tail") or "").strip() if status_data else ""
     st.caption(
         f"Live feed - auto-refreshes every 5s. Last updated {datetime.now().strftime('%H:%M:%S')}"
     )
@@ -282,12 +281,18 @@ def render_live_ingestion_feed(token):
         st.info("No ingestion activity yet.")
 
 
+def render_live_ingestion_feed(token):
+    """Terminal-style live feed of the ingestion worker output. Auto-refreshes every 5s."""
+    data = fetch_ingestion_status(token)
+    render_live_ingestion_feed_from_data(data)
+
+
 def render_ingestion_status_panel(status_data, token):
     if not status_data:
         return
     counts = status_data.get("counts") or {}
 
-    render_live_ingestion_feed(token)
+    render_live_ingestion_feed_from_data(status_data)
 
     st.markdown(
         '<span class="metric-text">documents become ready only after chunking AND graph; '
@@ -467,11 +472,11 @@ def render_ingestion_tab(token):
     render_ingestion_auto_refresh(token)
 
 
-@st.fragment(run_every=2)
+@st.fragment(run_every=5)
 def render_ingestion_auto_refresh(token):
-    with st.spinner("Loading ingestion status..."):
-        status_data = fetch_ingestion_status(token)
-    render_ingestion_status_panel(status_data, token)
+    status_data = fetch_ingestion_status(token)
+    if status_data:
+        render_ingestion_status_panel(status_data, token)
 
 
 def render_users_tab(token):
@@ -1062,21 +1067,30 @@ def messages_from_history(history):
     for item in reversed(history):
         question = item.get("question")
         answer = item.get("answer")
-        if not question or not answer:
+        if not question:
             continue
         messages.append({"role": "user", "content": question})
-        messages.append(
-            {
-                "role": "assistant",
-                "content": answer,
-                "metadata": {
-                    "verdict": item.get("verdict", "unknown"),
-                    "confidence": item.get("confidence") or 0.0,
-                    "citations": item.get("citations") or [],
-                    "intent": item.get("intent"),
-                },
-            }
-        )
+        if answer:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": answer,
+                    "metadata": {
+                        "verdict": item.get("verdict", "unknown"),
+                        "confidence": item.get("confidence") or 0.0,
+                        "citations": item.get("citations") or [],
+                        "intent": item.get("intent"),
+                    },
+                }
+            )
+        else:
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "*This query was interrupted before a response was generated. Please re-ask.*",
+                    "metadata": {"verdict": "interrupted"},
+                }
+            )
     return messages
 
 
@@ -1108,11 +1122,16 @@ def login_user(username, password):
         data = response.json()
         return data.get("access_token")
     except requests.exceptions.RequestException as e:
-        st.error(f"Authentication failed: {e}")
+        if hasattr(e, 'response') and e.response is not None and e.response.status_code == 400:
+            st.error("Incorrect username or password. Please try again.")
+        else:
+            st.error("Could not connect to server. Please try again later.")
         return None
 
 
 def ask_codex(question: str, selected_doc_ids=None):
+    if not st.session_state.get("token"):
+        return None
     headers = {"Authorization": f"Bearer {st.session_state.token}"}
     payload = {"question": question, "search_mode": "hybrid"}
     if selected_doc_ids:
@@ -1126,7 +1145,18 @@ def ask_codex(question: str, selected_doc_ids=None):
         )
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot reach the Codex API server. The server may have crashed or restarted.")
+        st.info("Start the API server and refresh this page.")
+        return None
+    except requests.exceptions.Timeout:
+        st.error("Query timed out (300s). The LLM server may be down or overloaded.")
+        st.info("Check that your local llama-server (port 8080) is running and try again.")
+        return None
     except requests.exceptions.RequestException as e:
+        if hasattr(e, 'response') and e.response is not None and e.response.status_code == 401:
+            st.session_state.token = None
+            st.rerun()
         st.error(f"Query error: {e}")
         return None
 
@@ -1152,8 +1182,15 @@ if not st.session_state.token:
                         st.session_state.token = token
                         st.session_state.username = username_input
                         st.query_params["token"] = token
-                        history = fetch_chat_history(token)
-                        st.session_state.messages = messages_from_history(history) if history else []
+                        import time as _time
+                        history = None
+                        for _attempt in range(3):
+                            history = fetch_chat_history(token)
+                            if history is not None:
+                                break
+                            _time.sleep(2)
+                        if history:
+                            st.session_state.messages = messages_from_history(history)
                         st.rerun()
 
     st.stop()
@@ -1276,7 +1313,7 @@ def _render_bubble(msg, msg_index=0):
                             key=f"{slot_key_prefix}_{slot.get('slot', 0)}",
                         )
                         idx = labels.index(selected_label)
-                        selected_ids.append(candidates[idx].get("id"))
+                        selected_ids.append(str(candidates[idx].get("id")))
 
                     # Store original question and selected IDs for Phase 2
                     original_q = meta.get("original_question", "")
@@ -1330,26 +1367,35 @@ def render_assistant_tab():
     if st.session_state.pending_conflict_question and st.session_state.selected_doc_ids:
         # Validate doc IDs are real UUIDs before proceeding
         doc_ids = st.session_state.selected_doc_ids
-        try:
-            [uuid.UUID(did) for did in doc_ids]
-        except (ValueError, TypeError):
-            st.session_state.selected_doc_ids = None
-            st.session_state.pending_conflict_question = None
-        else:
-            question = st.session_state.pending_conflict_question
-            st.session_state.pending_conflict_question = None
-            st.session_state.selected_doc_ids = None
+        original_q = st.session_state.pending_conflict_question
 
-            st.session_state.messages.append({"role": "user", "content": question})
+        # Clear state BEFORE submission so selection UI disappears immediately
+        st.session_state.pending_conflict_question = None
+        st.session_state.selected_doc_ids = None
+
+        # Clear document_slots from Phase 1 message so selection UI doesn't re-render
+        for msg in st.session_state.messages:
+            if (msg.get("role") == "assistant"
+                and msg.get("metadata", {}).get("verdict") == "pending_selection"
+                and msg.get("metadata", {}).get("document_slots")):
+                msg["metadata"]["document_slots"] = []
+                break
+
+        try:
+            _ = [uuid.UUID(did) for did in doc_ids]
+        except (ValueError, TypeError):
+            pass
+        else:
+            st.session_state.messages.append({"role": "user", "content": original_q})
             with st.chat_message("user"):
-                st.markdown(question)
+                st.markdown(original_q)
 
             with st.chat_message("assistant"):
                 with st.spinner("Running conflict analysis on selected documents..."):
-                    result = ask_codex(question, selected_doc_ids=doc_ids)
+                    result = ask_codex(original_q, selected_doc_ids=doc_ids)
 
             if result:
-                _store_result(result, question)
+                _store_result(result, original_q)
             else:
                 st.session_state.messages.append(
                     {"role": "assistant", "content": "Error processing your request. Please check connection."}

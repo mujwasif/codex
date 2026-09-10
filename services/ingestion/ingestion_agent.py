@@ -46,9 +46,19 @@ from packages.shared.config import (
     NEO4J_USER,
 )
 
+from packages.shared.config import LOG_DIR
+import os
+
+os.makedirs(LOG_DIR, exist_ok=True)
+log_file = os.path.join(LOG_DIR, "ingestion_agent.log")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(log_file),
+    ],
 )
 logger = logging.getLogger("ingestion_agent")
 

@@ -77,12 +77,9 @@ class TestType2bLargeCandidateSet(unittest.TestCase):
         )
 
         self.assertEqual(result["total_candidates"], 60)
-        self.assertEqual(result["evaluated_count"], 1)
-        self.assertFalse(result["inconclusive"], "Large candidate tail must not be reported as inconclusive")
-        self.assertFalse(result["truncated"])
-        self.assertEqual(result["genuine_failures"], 0)
-        self.assertTrue(result["evaluated_top_k"])
-        self.assertIn("most similar cross-policy clause pairs", result["coverage_note"])
+        self.assertEqual(result["total_llm_calls"], 3)
+        self.assertFalse(result["truncated"], "Large candidate tail must not be reported as truncated")
+        self.assertEqual(result["failed_calls"], 0)
 
     @mock.patch("services.agents.conflict_agent.llm_generate")
     @mock.patch(SIMILAR_MOCK_PATH)
@@ -98,9 +95,8 @@ class TestType2bLargeCandidateSet(unittest.TestCase):
             target_doc_title="Software Installation Policy",
             access_level=3,
         )
-        self.assertTrue(result["inconclusive"])
-        self.assertEqual(result["genuine_failures"], 1)
         self.assertTrue(result["truncated"])
+        self.assertEqual(result["failed_calls"], 1)
 
 
 if __name__ == "__main__":

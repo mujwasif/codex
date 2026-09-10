@@ -312,7 +312,7 @@ class DocumentConflictsResponse(BaseModel):
 
     document_id: str
     document_title: str
-    conflicting_documents: List[DocumentConflictGroup] = []
+    doc_pairs: List[Dict[str, Any]] = []
     total_conflicts: int = 0
     total_llm_calls: int = 0
     similarity_threshold: float = 0.6

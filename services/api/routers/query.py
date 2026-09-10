@@ -133,7 +133,7 @@ async def secure_query(
     pipeline_question = _build_pipeline_question(query_data.question, history)
 
     # 2. Log the query (store raw question, not the contextualized one)
-    query_id = uuid.uuid4()
+    query_id = str(uuid.uuid4())
     try:
         with get_db_session() as session:
             query_record = Query(
@@ -189,7 +189,7 @@ async def secure_query(
     abstained = ctx.state == QueryState.ABSTAINED
 
     # 5. Log the answer
-    answer_id = uuid.uuid4()
+    answer_id = str(uuid.uuid4())
     try:
         with get_db_session() as session:
             # Persist the classified intent so the next turn can inherit it
@@ -213,8 +213,8 @@ async def secure_query(
             for chunk in chunks:
                 citation = Citation(
                     answer_id=answer_id,
-                    chunk_id=uuid.UUID(chunk.get("id", str(uuid.uuid4()))),
-                    document_id=uuid.UUID(chunk.get("document_id", str(uuid.uuid4()))),
+                    chunk_id=chunk.get("id", str(uuid.uuid4())),
+                    document_id=chunk.get("document_id", str(uuid.uuid4())),
                     clause_ref=chunk.get("clause_ref"),
                     score=chunk.get("score", 0.0),
                 )

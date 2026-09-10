@@ -423,16 +423,16 @@ class TestType3_DocumentVsCorpus(unittest.TestCase):
         print(f"  LLM calls used: {result['total_llm_calls']}")
         print(f"  Truncated: {result['truncated']}")
         print()
-        for group in result["conflicting_documents"]:
-            print(f"  Conflicts in: {group['document_title']} ({group['document_id']})")
+        for group in result["doc_pairs"]:
+            print(f"  Conflicts in: {group['doc_b']['title']} ({group['doc_b']['id']})")
             print(f"    Candidates: {group['total_candidate_count']}")
             for i, c in enumerate(group["conflicts"], 1):
                 _print_conflict(i, c)
 
-        self.assertGreaterEqual(len(result["conflicting_documents"]), 1)
+        self.assertGreaterEqual(len(result["doc_pairs"]), 1)
         all_conflict_texts = " ".join(
             c["clause_a"]["text"] + c["clause_b"]["text"]
-            for g in result["conflicting_documents"]
+            for g in result["doc_pairs"]
             for c in g["conflicts"]
         )
         self.assertIn("180", all_conflict_texts)
@@ -455,8 +455,8 @@ class TestType3_DocumentVsCorpus(unittest.TestCase):
         print(f"  Total conflicts: {result['total_conflicts']}")
         print(f"  LLM calls used: {result['total_llm_calls']}")
         print()
-        for group in result["conflicting_documents"]:
-            print(f"  Conflicts in: {group['document_title']} ({group['document_id']})")
+        for group in result["doc_pairs"]:
+            print(f"  Conflicts in: {group['doc_b']['title']} ({group['doc_b']['id']})")
             for i, c in enumerate(group["conflicts"], 1):
                 _print_conflict(i, c)
 
@@ -480,8 +480,8 @@ class TestType3_DocumentVsCorpus(unittest.TestCase):
         print(f"  Total conflicts: {result['total_conflicts']}")
         print(f"  LLM calls used: {result['total_llm_calls']}")
         print()
-        for group in result["conflicting_documents"]:
-            print(f"  Conflicts in: {group['document_title']} ({group['document_id']})")
+        for group in result["doc_pairs"]:
+            print(f"  Conflicts in: {group['doc_b']['title']} ({group['doc_b']['id']})")
             for i, c in enumerate(group["conflicts"], 1):
                 _print_conflict(i, c)
 

@@ -6,6 +6,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-codex_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-password}
       POSTGRES_DB: ${POSTGRES_DB:-codex_db}
+    ports:
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -18,9 +20,6 @@ services:
 
   neo4j:
     image: neo4j:5.26
-    # No env_file here: the neo4j entrypoint maps every NEO4J_* var to a config
-    # setting, so leaking NEO4J_PASS from .env aborts boot ("Unrecognized
-    # setting: PASS"). Auth is injected below via compose-level interpolation.
     environment:
       NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASS:-change-this-password}
       NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
@@ -41,16 +40,22 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-codex_admin}:${POSTGRES_PASSWORD:-change-this-password}@postgres:5432/${POSTGRES_DB:-codex_db}
       NEO4J_URI: bolt://neo4j:7687
+      POSTGRES_HOST: postgres
       API_HOST: 0.0.0.0
       API_PORT: ${API_PORT:-8000}
       CORS_ORIGINS: '["http://localhost:8501","http://127.0.0.1:8501"]'
       LOG_DIR: /app/logs
       STATE_DIR: /app/state
+      HF_HOME: /app/.cache/huggingface
       PYTHONPATH: /app
+      LLM_BACKUP_BASE_URL: ""
+    ports:
+      - "${API_PORT:-8000}:8000"
     volumes:
       - ./archive:/app/archive
       - ./logs:/app/logs
       - ./state:/app/state
+      - hf_cache:/app/.cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,9 +71,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:$${API_PORT:-8000}/health | grep -q '\"status\":\"healthy\"'"]
       interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 40s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
     restart: unless-stopped
 
   ui:
@@ -105,20 +110,23 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-codex_admin}:${POSTGRES_PASSWORD:-change-this-password}@postgres:5432/${POSTGRES_DB:-codex_db}
       NEO4J_URI: bolt://neo4j:7687
+      CODEX_API_URL: http://api:8000
       LOG_DIR: /app/logs
       STATE_DIR: /app/state
+      HF_HOME: /app/.cache/huggingface
       PYTHONPATH: /app
     volumes:
       - ./archive:/app/archive
       - ./logs:/app/logs
       - ./state:/app/state
+      - hf_cache:/app/.cache/huggingface
     depends_on:
       api:
         condition: service_healthy
     command: >
       sh -c "exec python -m services.ingestion.ingestion_agent"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import os; pid=int(open(os.path.join(os.environ.get('STATE_DIR','/app/state'),'ingestion_worker.pid')).read().strip()); os.kill(pid, 0)\""]
+      test: ["CMD-SHELL", "python -c \"import os; pid=int(open(os.path.join(os.environ.get('LOG_DIR','/app/logs'),'ingestion_worker.pid')).read().strip()); os.kill(pid, 0)\""]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -136,10 +144,11 @@ services:
       LOG_DIR: /tmp/logs
       STATE_DIR: /tmp/state
       TEST_DB_NAME: codex_test_db
+      HF_HOME: /app/.cache/huggingface
       PYTHONPATH: /app
     volumes:
       - ./archive:/app/archive
-      - hf_cache:/root/.cache/huggingface
+      - hf_cache:/app/.cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy

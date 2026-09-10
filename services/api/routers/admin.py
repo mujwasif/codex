@@ -165,6 +165,10 @@ async def ingest_document(
     dest_path = os.path.join(archive_dir, filename)
 
     try:
+        # Remove existing file if present — bind-mounted files may be owned
+        # by the host user and unwritable by the container's appuser.
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
         with open(dest_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
     except Exception as e:
@@ -307,8 +311,10 @@ def ingestion_status(
 
             log_path = os.path.join(LOG_DIR, "ingestion_agent.log")
             with open(log_path, "r", errors="ignore") as f:
-                lines = f.readlines()
-                log_tail = "".join(lines[-60:])
+                f.seek(0, 2)
+                file_size = f.tell()
+                f.seek(max(0, file_size - 20000))
+                log_tail = f.read()[-4000:]
         except Exception:
             log_tail = ""
 

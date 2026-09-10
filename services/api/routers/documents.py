@@ -344,9 +344,9 @@ async def get_document_conflicts(
         )
 
         conflicting_docs = []
-        for doc_group in result["conflicting_documents"]:
+        for pair in result["doc_pairs"]:
             conflicts = []
-            for c in doc_group.get("conflicts", []):
+            for c in pair.get("conflicts", []):
                 ca = c.get("clause_a", {})
                 cb = c.get("clause_b", {})
                 conflicts.append(
@@ -360,21 +360,21 @@ async def get_document_conflicts(
                     )
                 )
             conflicting_docs.append(
-                DocumentConflictGroup(
-                    document_id=doc_group["document_id"],
-                    document_title=doc_group["document_title"],
-                    conflicts=conflicts,
-                    unchecked_candidate_count=doc_group.get(
+                {
+                    "doc_a": pair.get("doc_a", {}),
+                    "doc_b": pair.get("doc_b", {}),
+                    "conflicts": conflicts,
+                    "unchecked_candidate_count": pair.get(
                         "unchecked_candidate_count", 0
                     ),
-                    total_candidate_count=doc_group.get("total_candidate_count", 0),
-                )
+                    "total_candidate_count": pair.get("total_candidate_count", 0),
+                }
             )
 
         return DocumentConflictsResponse(
             document_id=document_id,
             document_title=target_title,
-            conflicting_documents=conflicting_docs,
+            doc_pairs=conflicting_docs,
             total_conflicts=result["total_conflicts"],
             total_llm_calls=result["total_llm_calls"],
             similarity_threshold=similarity_threshold,

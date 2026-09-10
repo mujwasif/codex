@@ -31,6 +31,16 @@ async def startup_event():
 
     ConnectionPool.initialize()
 
+    # Preload sentence-transformer models (retriever + reranker)
+    # so they're ready before the first query arrives
+    try:
+        from services.api.search import retriever, reranker
+        dim = retriever.get_sentence_embedding_dimension()
+        print(f"✓ Embedding model loaded: {dim}d")
+        print(f"✓ Reranker model loaded")
+    except Exception as e:
+        print(f"⚠️ Model preload failed: {e}")
+
     # Load global BM25 index (shared with the admin router and orchestrator)
     try:
         bm25 = BM25Index()

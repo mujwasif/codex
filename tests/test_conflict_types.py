@@ -323,8 +323,8 @@ class TestDetectConflictingDocuments(unittest.TestCase):
             target_doc_title="Security Policy",
             access_level=1,
         )
-        self.assertEqual(len(result["conflicting_documents"]), 1)
-        self.assertEqual(result["conflicting_documents"][0]["document_id"], "d2")
+        self.assertEqual(len(result["doc_pairs"]), 1)
+        self.assertEqual(result["doc_pairs"][0]["doc_b"]["id"], "d2")
 
     @mock.patch(SIMILAR_MOCK_PATH, _no_similar)
     def test_no_similar_returns_empty(self):
@@ -338,7 +338,7 @@ class TestDetectConflictingDocuments(unittest.TestCase):
             access_level=1,
         )
         self.assertEqual(result["total_conflicts"], 0)
-        self.assertEqual(result["conflicting_documents"], [])
+        self.assertEqual(result["doc_pairs"], [])
 
 
 # ---------------------------------------------------------------------------

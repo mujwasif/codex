@@ -856,29 +856,31 @@ def _run_clause_vs_corpus(ctx: QueryContext):
     from services.agents.conflict_agent import analyze_clause_vs_corpus
 
     try:
-        ctx.conflict_analysis = analyze_clause_vs_corpus(
+        result = analyze_clause_vs_corpus(
             ctx.chunks,
             access_level=ctx.access_level,
             query_text=ctx.raw_question or ctx.question,
-            candidate_retrieval_limit=30,
-            minimum_conflict_targets=3,
-            maximum_llm_comparisons=200,
-            threshold=0.57,
+            candidate_retrieval_limit=100,
         )
-        ctx.conflict_analysis["type"] = ctx.conflict_type or "type_1"
-        ctx.conflict_analysis["evaluated_top_k"] = ctx.conflict_analysis.get("evaluated_top_k", False)
-        ctx.conflict_analysis["coverage_note"] = ctx.conflict_analysis.get("coverage_note", "")
-        ctx.conflict_analysis["genuine_failures"] = ctx.conflict_analysis.get("genuine_failures", 0)
-        ctx.chunks = ctx.conflict_analysis.get("evidence", ctx.chunks)
-        ctx.conflicts = ctx.conflict_analysis.get("conflicts", [])
+        ctx.conflicts = result.get("conflicts", [])
+        ctx.chunks = result.get("clauses_sent", ctx.chunks)
+        ctx.conflict_analysis = {
+            "status": "complete" if not result.get("truncated") else "inconclusive",
+            "type": "type_1",
+            "total_candidates": result.get("total_candidates", 0),
+            "checked_candidates": result.get("total_conflicts", 0),
+            "llm_calls": result.get("total_llm_calls", 1),
+            "truncated": result.get("truncated", False),
+            "failed_calls": result.get("failed_calls", 0),
+        }
         ctx.state = QueryState.REASONED
     except Exception as e:
         ctx.conflicts = []
         ctx.conflict_analysis = {
-            "status": "inconclusive", "type": ctx.conflict_type or "type_1",
+            "status": "inconclusive", "type": "type_1",
             "total_candidates": 0, "checked_candidates": 0,
-            "unchecked_candidates": 0, "llm_calls": 0,
-            "truncated": True, "inconclusive": True, "error": str(e),
+            "total_llm_calls": 0, "failed_calls": 0,
+            "truncated": True,
         }
         ctx.error = f"Conflict analysis failed: {e}"
         ctx.state = QueryState.REASONED
@@ -974,22 +976,20 @@ def agent_conflict_type2b(ctx: QueryContext):
         )
 
         all_conflicts = []
-        for group in result.get("conflicting_documents", []):
-            all_conflicts.extend(group.get("conflicts", []))
+        for pair in result.get("doc_pairs", []):
+            all_conflicts.extend(pair.get("conflicts", []))
 
         ctx.conflicts = all_conflicts
         ctx.conflict_analysis = {
-            "status": "complete" if not result.get("inconclusive") else "inconclusive",
+            "status": "complete" if not result.get("truncated") else "inconclusive",
             "type": "type_2b",
             "total_candidates": result.get("total_candidates", 0),
             "checked_candidates": result.get("total_llm_calls", 0),
-            "evaluated_top_k": result.get("evaluated_top_k", False),
-            "coverage_note": result.get("coverage_note", ""),
-            "genuine_failures": result.get("genuine_failures", 0),
             "unchecked_candidates": 0,
             "llm_calls": result.get("total_llm_calls", 0),
             "truncated": result.get("truncated", False),
-            "inconclusive": result.get("inconclusive", False),
+            "failed_calls": result.get("failed_calls", 0),
+            "inconclusive": result.get("failed_calls", 0) > 0 and result.get("total_llm_calls", 0) <= result.get("failed_calls", 0),
         }
         # Citations = the OTHER-doc clauses from conflict pairs, not the
         # entire source policy (which would just be self-referential junk).

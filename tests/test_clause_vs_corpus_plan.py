@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused tests for the structured Clause-vs-Corpus workflow."""
+"""Tests for the query-driven Type 1 clause-vs-corpus workflow."""
 
 import json
 import os
@@ -9,7 +9,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from services.agents.conflict_agent import analyze_clause_vs_corpus
+from services.agents.conflict_agent import analyze_clause_vs_corpus, build_batches
 from services.agents.tools.base import ToolResult
 
 
@@ -21,7 +21,7 @@ def clause(doc, cid, text, ref, title):
         "clause_ref": ref,
         "section_path": "Controls",
         "title": title,
-        "similarity": 0.9,
+        "similarity": 0.70,
         "version": "1.0",
         "effective_date": "2026-01-01",
         "status": "active",
@@ -29,91 +29,188 @@ def clause(doc, cid, text, ref, title):
     }
 
 
-SOURCE = clause("source", "s1", "Employees must change passwords every 90 days.", "4.3.2", "Password Policy")
-SOURCE_RETENTION = clause("source", "s2", "Employees must retain records for 7 years.", "8.1", "Records Policy")
-SOURCE_TRAINING = clause("source", "s3", "Employees must complete security training every 90 days.", "2.1", "Training Policy")
-CANDIDATES = [
-    clause("d1", "c1", "Employees must change passwords every 60 days.", "6.1", "Access Policy"),
-    clause("d2", "c2", "Employees must retain records for 3 years.", "8.1", "Records Policy"),
-    clause("d3", "c3", "Employees must complete security training every 12 months.", "2.2", "Training Policy"),
+# 7 corpus clauses (will become C1-C7 after query clause C0 is prepended)
+CLAUSES = [
+    clause("doc1", "c1", "Employees must change passwords every 90 days.", "4.3", "Password Policy"),
+    clause("doc2", "c2", "Credentials must be rotated quarterly.", "6.1", "Access Control"),
+    clause("doc3", "c3", "Passwords must be changed every 60 days.", "3.2", "Security Baseline"),
+    clause("doc4", "c4", "MFA is required for admin access.", "2.1", "Admin Policy"),
+    clause("doc5", "c5", "Service accounts require 90-day rotation.", "5.1", "Infrastructure"),
+    clause("doc1", "c6", "Password reuse is prohibited for 12 cycles.", "4.4", "Password Policy"),
+    clause("doc6", "c7", "Backups must be encrypted at rest.", "7.1", "Backup Policy"),
 ]
 
 
 def _make_batch_response(conflicts_data):
-    """Build a mock ToolResult for _batch_conflict_check."""
     payload = {"conflicts": conflicts_data}
     return ToolResult(
-        success=True,
-        data=json.dumps(payload),
-        latency_ms=1,
-        tool_name="llm_generate",
+        success=True, data=json.dumps(payload),
+        latency_ms=1, tool_name="llm_generate",
     )
 
 
-class ClauseVsCorpusPlanTests(unittest.TestCase):
+class Type1ClauseVsCorpusTests(unittest.TestCase):
     @mock.patch("services.agents.conflict_agent.llm_generate")
     @mock.patch("services.api.search.find_similar_clauses")
-    def test_returns_all_validated_conflicts(self, find_similar, llm_gen):
-        find_similar.side_effect = lambda clause_text, **kwargs: {
-            SOURCE["text"]: [CANDIDATES[0]],
-            SOURCE_RETENTION["text"]: [CANDIDATES[1]],
-            SOURCE_TRAINING["text"]: [CANDIDATES[2]],
-        }.get(clause_text, [])
-
-        batch_conflicts = [
-            {"target_id": "T0", "candidate_id": "C0", "reason": "Both clauses impose incompatible mandatory periods.", "confidence": 0.95},
-            {"target_id": "T1", "candidate_id": "C1", "reason": "Both clauses impose incompatible retention periods.", "confidence": 0.91},
-            {"target_id": "T2", "candidate_id": "C2", "reason": "The requirements specify incompatible periods.", "confidence": 0.88},
-        ]
-        llm_gen.return_value = _make_batch_response(batch_conflicts)
-
-        result = analyze_clause_vs_corpus([SOURCE, SOURCE_RETENTION, SOURCE_TRAINING], access_level=1, maximum_llm_comparisons=15)
-
-        self.assertEqual(len(result["conflicts"]), 3)
-        self.assertEqual(result["total_candidates"], 3)
-        self.assertFalse(result["inconclusive"])
-        self.assertEqual(result["source_clauses"][0]["origin"], "query_source")
-        self.assertTrue(all(c["clause_b"]["origin"] == "corpus_candidate" for c in result["conflicts"]))
-
-    @mock.patch("services.agents.conflict_agent.llm_generate")
-    @mock.patch("services.api.search.find_similar_clauses")
-    def test_different_roles_are_complementary(self, find_similar, llm_gen):
-        candidate = clause("d1", "c1", "Administrators must change passwords every 60 days.", "6.1", "Admin Policy")
-        find_similar.return_value = [candidate]
-
-        llm_gen.return_value = _make_batch_response([])
-
-        result = analyze_clause_vs_corpus([SOURCE], access_level=1)
-        self.assertEqual(result["conflicts"], [])
-
-    @mock.patch("services.agents.conflict_agent.llm_generate")
-    @mock.patch("services.api.search.find_similar_clauses")
-    def test_budget_limited_is_not_inconclusive(self, find_similar, llm_gen):
-        find_similar.return_value = CANDIDATES
-
+    def test_clause_vs_clause_conflict(self, find_similar, llm_gen):
+        find_similar.return_value = CLAUSES
+        # 8 clauses → 3 batches of 3,3,2. Only batch 1 (offset 0) returns conflict.
+        # Batch 1 local C1 vs C3 → global C1 vs C3
         llm_gen.return_value = _make_batch_response([
-            {"target_id": "T0", "candidate_id": "C0", "reason": "Contradictory mandatory periods.", "confidence": 0.95},
+            {"clause_a_id": "C1", "clause_b_id": "C3",
+             "reason": "C1 says '90 days' while C3 says '60 days'.", "confidence": 0.95},
         ])
 
-        result = analyze_clause_vs_corpus([SOURCE], access_level=1, maximum_llm_comparisons=1)
-        self.assertEqual(result["unchecked_candidates"], 0)
-        self.assertEqual(result["evaluated_count"], 1)
-        self.assertFalse(result["inconclusive"])
-        self.assertFalse(result["truncated"])
-        self.assertTrue(result["evaluated_top_k"])
+        result = analyze_clause_vs_corpus([], access_level=1, query_text="password conflicts")
+        self.assertGreaterEqual(len(result["conflicts"]), 1)
+        # C0 = query clause, C1-C7 = corpus = 8 total
+        self.assertEqual(result["total_candidates"], len(CLAUSES) + 1)
+        self.assertGreaterEqual(result["total_llm_calls"], 1)
 
     @mock.patch("services.agents.conflict_agent.llm_generate")
     @mock.patch("services.api.search.find_similar_clauses")
-    def test_genuine_llm_failure_is_inconclusive(self, find_similar, llm_gen):
-        find_similar.return_value = CANDIDATES
+    def test_clause_vs_query_conflict(self, find_similar, llm_gen):
+        find_similar.return_value = CLAUSES
+        llm_gen.return_value = _make_batch_response([
+            {"clause_a_id": "C0", "clause_b_id": "C7",
+             "reason": "C0 states 'passwords must be encrypted' while C7 states 'backups must be encrypted'.", "confidence": 0.8},
+        ])
 
+        result = analyze_clause_vs_corpus(
+            [], access_level=1,
+            query_text="Passwords must be encrypted at rest.",
+        )
+        self.assertEqual(len(result["conflicts"]), 1)
+        # C0 is query clause — should NOT be filtered by same-doc guard
+        self.assertEqual(result["conflicts"][0]["clause_a"]["document_id"], "__query__")
+
+    @mock.patch("services.agents.conflict_agent.llm_generate")
+    @mock.patch("services.api.search.find_similar_clauses")
+    def test_hallucinated_id_filtered(self, find_similar, llm_gen):
+        find_similar.return_value = CLAUSES
+        llm_gen.return_value = _make_batch_response([
+            {"clause_a_id": "C999", "clause_b_id": "C0",
+             "reason": "Something.", "confidence": 0.9},
+        ])
+
+        result = analyze_clause_vs_corpus([], access_level=1, query_text="test")
+        self.assertEqual(len(result["conflicts"]), 0)
+
+    @mock.patch("services.agents.conflict_agent.llm_generate")
+    @mock.patch("services.api.search.find_similar_clauses")
+    def test_same_doc_conflict_filtered(self, find_similar, llm_gen):
+        find_similar.return_value = CLAUSES
+        # C1 and C6 are both from doc1 — local C1 vs C5 in batch 1 → global C1 vs C5
+        llm_gen.return_value = _make_batch_response([
+            {"clause_a_id": "C1", "clause_b_id": "C5",
+             "reason": "Both in Password Policy.", "confidence": 0.8},
+        ])
+
+        result = analyze_clause_vs_corpus([], access_level=1, query_text="test")
+        self.assertEqual(len(result["conflicts"]), 0)
+
+    @mock.patch("services.agents.conflict_agent.llm_generate")
+    @mock.patch("services.api.search.find_similar_clauses")
+    def test_llm_failure(self, find_similar, llm_gen):
+        find_similar.return_value = CLAUSES
         llm_gen.return_value = ToolResult(
             success=False, error="timeout", latency_ms=0, tool_name="llm_generate",
         )
+        result = analyze_clause_vs_corpus([], access_level=1, query_text="test")
+        # 3 batches, all fail
+        self.assertEqual(result["total_llm_calls"], 0)
+        self.assertEqual(result["failed_calls"], 3)
 
-        result = analyze_clause_vs_corpus([SOURCE], access_level=1, maximum_llm_comparisons=3)
-        self.assertTrue(result["inconclusive"])
-        self.assertTrue(result["truncated"])
+    @mock.patch("services.agents.conflict_agent.llm_generate")
+    @mock.patch("services.api.search.find_similar_clauses")
+    def test_uses_query_text_for_search(self, find_similar, llm_gen):
+        find_similar.return_value = CLAUSES
+        llm_gen.return_value = _make_batch_response([])
+        analyze_clause_vs_corpus([], access_level=1, query_text="VPN access requirements")
+        find_similar.assert_called_once_with(
+            clause_text="VPN access requirements",
+            access_level=1,
+            top_k=200,
+            threshold=0.57,
+        )
+
+    @mock.patch("services.agents.conflict_agent.llm_generate")
+    @mock.patch("services.api.search.find_similar_clauses")
+    def test_query_clause_prepended(self, find_similar, llm_gen):
+        find_similar.return_value = CLAUSES
+        llm_gen.return_value = _make_batch_response([])
+
+        result = analyze_clause_vs_corpus(
+            [], access_level=1,
+            query_text="Passwords must rotate every 30 days.",
+        )
+        # C0 should be the query clause
+        self.assertEqual(result["total_candidates"], len(CLAUSES) + 1)
+
+    @mock.patch("services.agents.conflict_agent.llm_generate")
+    @mock.patch("services.api.search.find_similar_clauses")
+    def test_077_filter(self, find_similar, llm_gen):
+        # Mix of clauses within and above 0.77
+        high_sim = clause("doc8", "c8", "High similarity clause.", "1.1", "Doc8")
+        high_sim["similarity"] = 0.85
+        low_sim = clause("doc9", "c9", "Low similarity clause.", "2.1", "Doc9")
+        low_sim["similarity"] = 0.60
+        find_similar.return_value = [high_sim, low_sim]
+        llm_gen.return_value = _make_batch_response([])
+
+        result = analyze_clause_vs_corpus([], access_level=1, query_text="test")
+        # C0=query(1.0) + C1=low_sim(0.60) = 2 clauses. high_sim(0.85) filtered out
+        self.assertEqual(result["total_candidates"], 2)
+
+
+class BuildBatchesTests(unittest.TestCase):
+    def test_86_clauses(self):
+        batches = build_batches(list(range(86)))
+        self.assertEqual(len(batches), 3)
+        self.assertEqual(len(batches[0][1]), 29)
+
+    def test_50_clauses(self):
+        batches = build_batches(list(range(50)))
+        self.assertEqual(len(batches), 3)
+
+    def test_20_clauses(self):
+        batches = build_batches(list(range(20)))
+        self.assertEqual(len(batches), 3)
+        self.assertEqual(len(batches[0][1]), 7)
+
+    def test_5_clauses_always_3_batches(self):
+        batches = build_batches(list(range(5)))
+        self.assertEqual(len(batches), 3)
+        self.assertEqual(len(batches[0][1]), 2)
+        self.assertEqual(len(batches[1][1]), 2)
+        self.assertEqual(len(batches[2][1]), 2)
+
+    def test_3_clauses_always_3_batches(self):
+        batches = build_batches(list(range(3)))
+        self.assertEqual(len(batches), 3)
+        self.assertEqual(len(batches[0][1]), 1)
+
+    def test_1_clause(self):
+        batches = build_batches([0])
+        self.assertEqual(len(batches), 3)
+        self.assertEqual(batches[0][1], [0])
+
+    def test_overlap_exists(self):
+        batches = build_batches(list(range(50)))
+        batch1_end = set(batches[0][1])
+        batch2_start = set(batches[1][1][:2])
+        self.assertTrue(len(batch1_end & batch2_start) >= 1)
+
+    def test_empty_clauses(self):
+        batches = build_batches([])
+        self.assertEqual(len(batches), 0)
+
+    def test_100_clauses(self):
+        batches = build_batches(list(range(100)))
+        self.assertEqual(len(batches), 3)
+        self.assertEqual(len(batches[0][1]), 34)
+        self.assertEqual(len(batches[1][1]), 34)
+        self.assertEqual(len(batches[2][1]), 34)
 
 
 if __name__ == "__main__":
