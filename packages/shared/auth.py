@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta
 from jose import jwt
 from hashward import CryptContext
-from packages.shared.config import SECRET_KEY, ALGORITHM, TOKEN_EXPIRE_MINUTES
+from packages.shared.config import SECRET_KEY, ALGORITHM, TOKEN_EXPIRE_MINUTES, REFRESH_TOKEN_EXPIRE_MINUTES
 
 # Password hashing context - uses argon2 by default, supports bcrypt fallback
 pwd_context = CryptContext(
@@ -20,7 +20,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "type": "access"})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def create_refresh_token(data: dict) -> str:
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire, "type": "refresh"})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 def verify_token(token: str):

@@ -1120,13 +1120,34 @@ def login_user(username, password):
         )
         response.raise_for_status()
         data = response.json()
-        return data.get("access_token")
+        return data.get("access_token"), data.get("refresh_token")
     except requests.exceptions.RequestException as e:
         if hasattr(e, 'response') and e.response is not None and e.response.status_code == 400:
             st.error("Incorrect username or password. Please try again.")
         else:
             st.error("Could not connect to server. Please try again later.")
-        return None
+        return None, None
+
+
+def _try_refresh_token() -> bool:
+    """Attempt to refresh the access token using the stored refresh token. Returns True on success."""
+    refresh = st.session_state.get("refresh_token")
+    if not refresh:
+        return False
+    try:
+        resp = requests.post(
+            f"{API_BASE_URL}/refresh",
+            headers={"Authorization": f"Bearer {refresh}"},
+            timeout=10,
+        )
+        if resp.ok:
+            data = resp.json()
+            st.session_state.token = data["access_token"]
+            st.session_state.refresh_token = data["refresh_token"]
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def ask_codex(question: str, selected_doc_ids=None):
@@ -1143,6 +1164,19 @@ def ask_codex(question: str, selected_doc_ids=None):
             headers=headers,
             timeout=300,
         )
+        if response.status_code == 401:
+            if _try_refresh_token():
+                headers["Authorization"] = f"Bearer {st.session_state.token}"
+                response = requests.post(
+                    f"{API_BASE_URL}/query",
+                    json=payload,
+                    headers=headers,
+                    timeout=300,
+                )
+            else:
+                st.session_state.token = None
+                st.session_state.refresh_token = None
+                st.rerun()
         response.raise_for_status()
         return response.json()
     except requests.exceptions.ConnectionError:
@@ -1154,9 +1188,6 @@ def ask_codex(question: str, selected_doc_ids=None):
         st.info("Check that your local llama-server (port 8080) is running and try again.")
         return None
     except requests.exceptions.RequestException as e:
-        if hasattr(e, 'response') and e.response is not None and e.response.status_code == 401:
-            st.session_state.token = None
-            st.rerun()
         st.error(f"Query error: {e}")
         return None
 
@@ -1177,15 +1208,16 @@ if not st.session_state.token:
                 if not username_input or not password_input:
                     st.warning("Please enter both username and password.")
                 else:
-                    token = login_user(username_input, password_input)
-                    if token:
-                        st.session_state.token = token
+                    access_token, refresh_token = login_user(username_input, password_input)
+                    if access_token:
+                        st.session_state.token = access_token
+                        st.session_state.refresh_token = refresh_token
                         st.session_state.username = username_input
-                        st.query_params["token"] = token
+                        st.query_params["token"] = access_token
                         import time as _time
                         history = None
                         for _attempt in range(3):
-                            history = fetch_chat_history(token)
+                            history = fetch_chat_history(access_token)
                             if history is not None:
                                 break
                             _time.sleep(2)

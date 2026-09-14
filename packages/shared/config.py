@@ -62,6 +62,7 @@ API_PORT = int(os.getenv("API_PORT", "8000"))
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-to-a-random-secure-string")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 TOKEN_EXPIRE_MINUTES = int(os.getenv("TOKEN_EXPIRE_MINUTES", "30"))
+REFRESH_TOKEN_EXPIRE_MINUTES = int(os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", "43200"))
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS", '["http://localhost:8501","http://127.0.0.1:8501"]'
 )
