@@ -692,15 +692,42 @@ def agent_reason(ctx: QueryContext):
         # question for the reasoner to generate a natural answer.
         if ctx.intent == QueryIntent.APPROVAL and ctx.approval_result:
             approval_text = _format_approval_for_llm(ctx.approval_result)
-            final_query = (
-                f"{ctx.raw_question or ctx.question}\n\n"
-                f"KNOWLEDGE GRAPH RESULT:\n{approval_text}\n\n"
-                f"Based on the knowledge graph result and any relevant policy "
-                f"context above, answer the user's question in a conversational "
-                f"tone. If the knowledge graph found a matching process, describe "
-                f"the approval chain. If no matching process was found, suggest "
-                f"checking with a manager or policy owner."
-            )
+
+            # If approval agent found no match or errored, handle gracefully
+            # instead of sending minimal context to the reasoner.
+            if not ctx.approval_result.get("approvable") or ctx.approval_result.get("error"):
+                if ctx.chunks:
+                    final_query = (
+                        f"{ctx.raw_question or ctx.question}\n\n"
+                        f"KNOWLEDGE GRAPH RESULT:\n{approval_text}\n\n"
+                        f"The knowledge graph does not define an approval chain for "
+                        f"this action. Based on any relevant policy context above, "
+                        f"answer the user's question. If no relevant policy "
+                        f"information is found, say: 'This approval process is not "
+                        f"defined in the current policy corpus. Please consult your "
+                        f"manager or the policy owner for guidance on approval "
+                        f"authority for this action.'"
+                    )
+                else:
+                    ctx.answer = (
+                        "The knowledge graph does not define an approval chain for "
+                        "this action. The policy corpus does not contain approval "
+                        "authority information related to your question.\n\n"
+                        "**Recommendation:** Please consult your manager or the "
+                        "policy owner for guidance on approval authority for this action."
+                    )
+                    ctx.state = QueryState.REASONED
+                    return
+            else:
+                final_query = (
+                    f"{ctx.raw_question or ctx.question}\n\n"
+                    f"KNOWLEDGE GRAPH RESULT:\n{approval_text}\n\n"
+                    f"Based on the knowledge graph result and any relevant policy "
+                    f"context above, answer the user's question in a conversational "
+                    f"tone. If the knowledge graph found a matching process, describe "
+                    f"the approval chain. If no matching process was found, suggest "
+                    f"checking with a manager or policy owner."
+                )
 
         # For conflict/compliance intents the specialized agent verdict is
         # the primary answer once its structured result is available.
@@ -762,6 +789,20 @@ def agent_reason(ctx: QueryContext):
             ctx.answer += (
                 "\n\nNote: This question may be better answered as a conflict "
                 "analysis. Try rephrasing with 'Compare X and Y for conflicts'."
+            )
+
+        # Safety net: if approval agent found no match and the reasoner
+        # echoed "Insufficient", replace with a direct helpful answer.
+        if (ctx.intent == QueryIntent.APPROVAL
+                and ctx.approval_result
+                and not ctx.approval_result.get("approvable")
+                and "Insufficient" in (ctx.answer or "")):
+            ctx.answer = (
+                "The knowledge graph does not define an approval chain for "
+                "this action. The policy corpus does not contain approval "
+                "authority information related to your question.\n\n"
+                "**Recommendation:** Please consult your manager or the "
+                "policy owner for guidance on approval authority for this action."
             )
 
         ctx.state = QueryState.REASONED

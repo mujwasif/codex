@@ -4,7 +4,7 @@ User management endpoints: admin-only CRUD for the users table.
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from packages.shared.schemas import UserCreate, UserUpdate, UserListResponse
+from packages.shared.schemas import UserCreate, UserUpdate, UserListResponse, PasswordResetRequest
 from packages.shared.db import get_db_session
 from packages.shared.models import User
 from packages.shared.auth import get_pwd_hash
@@ -153,3 +153,32 @@ async def delete_user(user_id: str, current_user: dict = Depends(require_admin))
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete user: {e}")
+
+
+@router.post("/users/{user_id}/reset-password")
+async def reset_user_password(
+    user_id: str,
+    body: PasswordResetRequest,
+    current_user: dict = Depends(require_admin),
+):
+    """Reset a user's password (admin only)."""
+    try:
+        with get_db_session() as session:
+            user = session.query(User).filter(User.id == user_id).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+
+            user.password_hash = get_pwd_hash(body.new_password)
+            session.commit()
+
+            log_audit_action(
+                current_user.get("username"),
+                "reset_password",
+                {"target_user": user.username},
+            )
+
+            return {"status": "reset", "username": user.username, "user_id": user_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to reset password: {e}")

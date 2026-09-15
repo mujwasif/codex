@@ -30,8 +30,8 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 COPY --chown=appuser:appuser . .
 
 # Runtime dirs bind-mounted in compose; ensure writable for non-root
-RUN mkdir -p /app/logs /app/state /app/.state /app/archive && \
-    chown appuser:appuser /app/logs /app/state /app/.state /app/archive
+RUN mkdir -p /app/logs /app/state /app/.state /app/archive /app/.cache && \
+    chown -R appuser:appuser /app/logs /app/state /app/.state /app/archive /app/.cache
 
 USER appuser
 

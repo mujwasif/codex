@@ -86,7 +86,8 @@ HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "5"))
 HISTORY_MAX_TOKENS = int(os.getenv("HISTORY_MAX_TOKENS", "2500"))
 
 # ── Ingestion ─────────────────────────────────────────────
-MAX_CLAUSE_TOKENS = int(os.getenv("MAX_CLAUSE_TOKENS", "200"))
+MAX_CLAUSE_TOKENS = int(os.getenv("MAX_CLAUSE_TOKENS", "70"))
+MIN_CLAUSE_TOKENS = int(os.getenv("MIN_CLAUSE_TOKENS", "30"))
 OVERLAP_TOKENS = int(os.getenv("OVERLAP_TOKENS", "20"))
 USE_LLM_FOR_CHUNKING = os.getenv("USE_LLM_FOR_CHUNKING", "true").lower() == "true"
 GRAPH_BATCH_SIZE = int(os.getenv("GRAPH_BATCH_SIZE", "30"))

@@ -32,6 +32,10 @@ class UserUpdate(BaseModel):
     access_level: Optional[int] = Field(None, ge=1, le=3)
 
 
+class PasswordResetRequest(BaseModel):
+    new_password: str = Field(..., min_length=6)
+
+
 class UserListResponse(BaseModel):
     id: str
     username: str

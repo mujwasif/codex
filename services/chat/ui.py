@@ -236,6 +236,25 @@ def delete_user_api(token, user_id):
         return None
 
 
+def reset_user_password_api(token, user_id, new_password):
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/users/{user_id}/reset-password",
+            json={"new_password": new_password},
+            headers=headers,
+            timeout=10,
+        )
+        if response.status_code == 404:
+            st.error("User not found.")
+            return None
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Failed to reset password: {e}")
+        return None
+
+
 def fetch_documents(token):
     try:
         response = requests.get(
@@ -526,7 +545,7 @@ def render_users_tab(token):
         return
 
     # Render table
-    header_cols = st.columns([2, 2, 1, 1, 2, 2])
+    header_cols = st.columns([2, 2, 1, 1, 2, 3])
     headers = ["Username", "Department", "Level", "Active", "Created", "Actions"]
     for col, h in zip(header_cols, headers):
         with col:
@@ -538,7 +557,7 @@ def render_users_tab(token):
         active_badge = "Yes" if user["is_active"] else "No"
         created = (user.get("created_at") or "")[:10]
 
-        row_cols = st.columns([2, 2, 1, 1, 2, 2])
+        row_cols = st.columns([2, 2, 1, 1, 2, 3])
         with row_cols[0]:
             st.write(user["username"])
         with row_cols[1]:
@@ -552,11 +571,15 @@ def render_users_tab(token):
         with row_cols[5]:
             edit_key = f"edit_{uid}"
             delete_key = f"delete_{uid}"
-            e1, e2 = st.columns(2)
+            reset_key = f"reset_{uid}"
+            e1, e2, e3 = st.columns(3)
             with e1:
                 if st.button("Edit", key=edit_key, use_container_width=True):
                     st.session_state[f"editing_{uid}"] = True
             with e2:
+                if st.button("Reset PW", key=reset_key, use_container_width=True):
+                    st.session_state[f"resetting_{uid}"] = True
+            with e3:
                 if st.button("Delete", key=delete_key, use_container_width=True, type="secondary"):
                     st.session_state[f"deleting_{uid}"] = True
 
@@ -588,6 +611,35 @@ def render_users_tab(token):
                         st.rerun()
                 if cancel_clicked:
                     st.session_state[f"editing_{uid}"] = False
+                    st.rerun()
+
+        # --- Inline password reset ---
+        if st.session_state.get(f"resetting_{uid}"):
+            with st.expander(f"Reset password for {user['username']}", expanded=True):
+                with st.form(f"reset_form_{uid}"):
+                    new_pass = st.text_input("New Password", type="password", key=f"new_pass_{uid}")
+                    confirm_pass = st.text_input("Confirm Password", type="password", key=f"confirm_pass_{uid}")
+                    rc1, rc2 = st.columns(2)
+                    with rc1:
+                        reset_clicked = st.form_submit_button("Reset Password", type="primary")
+                    with rc2:
+                        cancel_reset = st.form_submit_button("Cancel")
+
+                if reset_clicked:
+                    if not new_pass:
+                        st.error("Password is required.")
+                    elif len(new_pass) < 6:
+                        st.error("Password must be at least 6 characters.")
+                    elif new_pass != confirm_pass:
+                        st.error("Passwords do not match.")
+                    else:
+                        result = reset_user_password_api(token, uid, new_pass)
+                        if result:
+                            st.success(f"Password reset for '{result['username']}'.")
+                            st.session_state[f"resetting_{uid}"] = False
+                            st.rerun()
+                if cancel_reset:
+                    st.session_state[f"resetting_{uid}"] = False
                     st.rerun()
 
         # --- Inline delete confirmation ---
