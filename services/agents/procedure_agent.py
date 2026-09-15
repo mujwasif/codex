@@ -3,7 +3,7 @@ Procedure Agent - Generates structured workflows or summaries for procedural que
 """
 import re
 from typing import List, Dict, Any, Optional
-from services.agents.tools.llm_tools import llm_generate, QWEN3_8B_MODEL
+from services.agents.tools.llm_tools import llm_generate, AGENT_MODEL
 
 
 class ProcedureAgent:
@@ -96,7 +96,7 @@ Question: {question}
 """
 
         result = llm_generate(
-            model=QWEN3_8B_MODEL,
+            model=AGENT_MODEL,
             system_prompt=(
                 "You are a senior policy analyst who explains policies in a clear, "
                 "conversational tone — like you're helping a colleague understand what "

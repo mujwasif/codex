@@ -17,7 +17,7 @@ import logging
 import re
 import time
 from typing import List, Dict, Optional
-from services.agents.tools.llm_tools import llm_generate, QWEN3_4B_MODEL
+from services.agents.tools.llm_tools import llm_generate
 
 from packages.shared.config import LLM_INGESTION_MODEL
 

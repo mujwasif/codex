@@ -12,7 +12,7 @@ def _batch_detect_clauses(
     all_sections: list,
 ) -> dict:
     """Send all LLM-needy sections in ONE API call. Returns {index: [clauses]}."""
-    from services.agents.tools.llm_tools import llm_generate, QWEN3_4B_MODEL
+    from services.agents.tools.llm_tools import llm_generate, INGESTION_MODEL
 
     if not sections_needing_llm:
         return {}
@@ -41,7 +41,7 @@ SECTIONS:
 """
 
     result = llm_generate(
-        model=QWEN3_4B_MODEL,
+        model=INGESTION_MODEL,
         system_prompt="You are a policy document parser. Split each numbered section into rules. Output a JSON object mapping section numbers to arrays of clause strings in a ```json fenced block.",
         user_message=prompt,
         temperature=0.0,

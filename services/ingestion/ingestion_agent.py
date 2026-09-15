@@ -94,13 +94,12 @@ def _pid_is_worker(pid: int) -> bool:
 def _acquire_singleton_lock() -> bool:
     """Claim the worker lockfile atomically. Returns False if another worker runs."""
     try:
-        # Use a persistent project path instead of /tmp to ensure UI can find it
-        lock_path = os.path.join(LOG_DIR, "ingestion_worker.pid")
+        lock_path = WORKER_LOCK_PATH
         fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
         stale = True
         try:
-            lock_path = os.path.join(LOG_DIR, "ingestion_worker.pid")
+            lock_path = WORKER_LOCK_PATH
             with open(lock_path, "r") as f:
                 existing = f.read().strip()
             if existing.isdigit() and _pid_is_worker(int(existing)):
@@ -111,12 +110,17 @@ def _acquire_singleton_lock() -> bool:
         except Exception:
             pass
         try:
-            lock_path = os.path.join(LOG_DIR, "ingestion_worker.pid")
+            lock_path = WORKER_LOCK_PATH
             os.remove(lock_path)
         except FileNotFoundError:
             pass
         try:
-            lock_path = os.path.join(LOG_DIR, "ingestion_worker.pid")
+            lock_path = WORKER_LOCK_PATH
+            os.remove(lock_path)
+        except FileNotFoundError:
+            pass
+        try:
+            lock_path = WORKER_LOCK_PATH
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
             logger.info("Another ingestion worker is already running; exiting.")

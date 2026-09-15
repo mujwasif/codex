@@ -17,7 +17,7 @@ import math
 import re
 from typing import Dict, Any, List, Optional, Tuple
 from services.agents.tools.neo4j_tools import neo4j_query
-from services.agents.tools.llm_tools import llm_generate, QWEN3_8B_MODEL, QWEN3_4B_MODEL
+from services.agents.tools.llm_tools import llm_generate, AGENT_MODEL, INGESTION_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +139,7 @@ Respond with JSON only:
 {{"status":"confirmed_conflict|possible_conflict|no_conflict|complementary_scope|superseded", "subject":"topic", "scope_overlap":true, "difference_type":"threshold|modality|scope|time|negation|requirement", "source_requirement":"requirement from clause A (paraphrase OK)", "candidate_requirement":"requirement from clause B (paraphrase OK)", "confidence":0.0, "reason":"brief evidence-backed explanation", "missing_context":[]}}"""
 
     result = llm_generate(
-        model=QWEN3_8B_MODEL,
+        model=AGENT_MODEL,
         system_prompt=(
             "You are a policy conflict analyst. Find contradictions between policy clauses. When in doubt, flag it.\n"
             "Respond ONLY with a valid JSON object. No markdown fences, no extra text."
@@ -293,7 +293,7 @@ OUTPUT FORMAT:
 If no conflicts: {{"conflicts": []}}'''
 
         result = llm_generate(
-            model=QWEN3_8B_MODEL,
+            model=AGENT_MODEL,
             system_prompt=system_prompt,
             user_message=prompt,
             temperature=0.0,
@@ -471,7 +471,7 @@ Think through each pair before outputting JSON. Output ONLY:
 If no conflicts: {{"conflicts": []}}"""
 
         result = llm_generate(
-            model=QWEN3_8B_MODEL,
+            model=AGENT_MODEL,
             system_prompt=system_prompt,
             user_message=prompt,
             temperature=0.0,
@@ -525,7 +525,7 @@ Think through each pair before outputting JSON. Output ONLY:
 If no conflicts: {{"conflicts": []}}."""
 
         result = llm_generate(
-            model=QWEN3_8B_MODEL,
+            model=AGENT_MODEL,
             system_prompt=system_prompt,
             user_message=prompt,
             temperature=0.0,
@@ -570,7 +570,7 @@ Return a JSON object with "conflicts" — include every pair where you found a r
 If no conflicts, return {{"conflicts": []}}."""
 
         result = llm_generate(
-            model=QWEN3_8B_MODEL,
+            model=AGENT_MODEL,
             system_prompt=system_prompt,
             user_message=prompt,
             temperature=0.0,
@@ -1348,7 +1348,7 @@ def analyze_clause_vs_corpus(
     search_queries = [query_text]
     try:
         topic_result = llm_generate(
-            model=QWEN3_4B_MODEL,
+            model=INGESTION_MODEL,
             system_prompt=(
                 "You are a search query generator for a policy document system.\n"
                 "Given a user question, generate 2 NEW search queries to find ALL related clauses.\n"

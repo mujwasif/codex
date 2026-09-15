@@ -7,7 +7,7 @@ Enforces cite-or-abstain invariant.
 
 import re
 
-from services.agents.tools.llm_tools import llm_generate, QWEN3_8B_MODEL
+from services.agents.tools.llm_tools import llm_generate, AGENT_MODEL
 
 SYSTEM_PROMPT = """
 You are the Codex Policy Intelligence Engine. Your goal is to provide grounded, cited answers based ONLY on the provided context.
@@ -64,7 +64,7 @@ def generate_grounded_answer(query, context_chunks, feedback_guidance=""):
     user_message = f"Context:\n{context_text}{guidance_text}\n\nQuestion: {query}"
 
     result = llm_generate(
-        model=QWEN3_8B_MODEL,
+        model=AGENT_MODEL,
         system_prompt=SYSTEM_PROMPT,
         user_message=user_message,
         temperature=0.0,

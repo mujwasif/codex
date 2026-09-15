@@ -23,6 +23,9 @@ services:
     environment:
       NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASS:-change-this-password}
       NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+    ports:
+      - "7474:7474"
+      - "7687:7687"
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -48,7 +51,6 @@ services:
       STATE_DIR: /app/state
       HF_HOME: /app/.cache/huggingface
       PYTHONPATH: /app
-      LLM_BACKUP_BASE_URL: ""
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
@@ -126,7 +128,7 @@ services:
     command: >
       sh -c "exec python -m services.ingestion.ingestion_agent"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import os; pid=int(open(os.path.join(os.environ.get('LOG_DIR','/app/logs'),'ingestion_worker.pid')).read().strip()); os.kill(pid, 0)\""]
+      test: ["CMD-SHELL", "pgrep -f 'services.ingestion.ingestion_agent' || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

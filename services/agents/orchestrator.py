@@ -18,7 +18,7 @@ import re
 import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
-from services.agents.tools.llm_tools import llm_generate, QWEN3_8B_MODEL
+from services.agents.tools.llm_tools import llm_generate, AGENT_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -549,7 +549,7 @@ Q: "{question}"
 → Thinking:"""
 
     result = llm_generate(
-        model=QWEN3_8B_MODEL,
+        model=AGENT_MODEL,
         system_prompt='Think step by step about the user intent. Output a "→ Thinking:" line with your reasoning, then output ONLY the JSON object. The "intent" field MUST be exactly one of: approval, conflict, compliance, procedure, general, conversational.',
         user_message=prompt,
         temperature=0.0,
@@ -1075,10 +1075,10 @@ def agent_risk_compliance(ctx: QueryContext):
 
 def agent_conversational(ctx: QueryContext):
     """Handle greetings, thanks, and casual conversation via LLM."""
-    from services.agents.tools.llm_tools import llm_generate, QWEN3_8B_MODEL
+from services.agents.tools.llm_tools import llm_generate, AGENT_MODEL
 
     result = llm_generate(
-        model=QWEN3_8B_MODEL,
+        model=AGENT_MODEL,
         system_prompt=(
             "You are Codex, a friendly policy intelligence assistant. "
             "The user's message includes a Conversation History section showing recent turns. "

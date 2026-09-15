@@ -14,9 +14,9 @@ from services.agents.tools.connections import ConnectionPool
 from packages.shared.config import LLM_INGESTION_MODEL, LLM_MODEL
 from packages.shared.llm_client import chat_completion
 
-QWEN3_8B_MODEL = LLM_MODEL
-QWEN3_4B_MODEL = LLM_INGESTION_MODEL
-AGENT_8081_MODELS = {QWEN3_4B_MODEL.lower()}
+AGENT_MODEL = LLM_MODEL
+INGESTION_MODEL = LLM_INGESTION_MODEL
+INGESTION_MODELS = {INGESTION_MODEL.lower()}
 
 
 @tool(name="llm_generate", failure_threshold=3)
@@ -75,7 +75,7 @@ def llm_generate(
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             session = ConnectionPool.get_http()
-            request_model = LLM_INGESTION_MODEL if model.lower() in AGENT_8081_MODELS else LLM_MODEL
+            request_model = LLM_INGESTION_MODEL if model.lower() in INGESTION_MODELS else LLM_MODEL
             extra = {}
             if "chat_template_kwargs" in payload:
                 extra["chat_template_kwargs"] = payload["chat_template_kwargs"]

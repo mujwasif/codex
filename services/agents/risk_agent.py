@@ -12,7 +12,7 @@ Maps to regulations and provides risk assessment.
 import re
 from typing import Dict, Any, List
 from services.agents.tools.neo4j_tools import neo4j_query
-from services.agents.tools.llm_tools import llm_generate, QWEN3_8B_MODEL
+from services.agents.tools.llm_tools import llm_generate, AGENT_MODEL
 
 
 def _get_regulations_for_chunks(chunks: List[Dict[str, Any]]) -> List[str]:
@@ -87,7 +87,7 @@ def _classify_by_llm(question: str, chunks: List[Dict[str, Any]]) -> Dict[str, A
     Respond with JSON only:"""
 
     result = llm_generate(
-        model=QWEN3_8B_MODEL,
+        model=AGENT_MODEL,
         system_prompt="You are a strict compliance officer. Use Chain-of-Thought reasoning to analyze policy risk. Respond ONLY with a JSON object containing 'verdict' and 'elaboration'.",
         user_message=prompt,
         temperature=0.0,

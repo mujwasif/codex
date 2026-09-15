@@ -33,8 +33,8 @@ from services.agents.tools.neo4j_tools import neo4j_query
 from services.agents.tools.llm_tools import (
     llm_generate,
     llm_generate_json,
-    QWEN3_8B_MODEL,
-    QWEN3_4B_MODEL,
+    AGENT_MODEL,
+    INGESTION_MODEL,
 )
 
 __all__ = [
@@ -48,6 +48,6 @@ __all__ = [
     "neo4j_query",
     "llm_generate",
     "llm_generate_json",
-    "QWEN3_8B_MODEL",
-    "QWEN3_4B_MODEL",
+    "AGENT_MODEL",
+    "INGESTION_MODEL",
 ]
