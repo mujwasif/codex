@@ -1075,7 +1075,7 @@ def agent_risk_compliance(ctx: QueryContext):
 
 def agent_conversational(ctx: QueryContext):
     """Handle greetings, thanks, and casual conversation via LLM."""
-from services.agents.tools.llm_tools import llm_generate, AGENT_MODEL
+    from services.agents.tools.llm_tools import llm_generate, AGENT_MODEL
 
     result = llm_generate(
         model=AGENT_MODEL,

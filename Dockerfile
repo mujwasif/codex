@@ -15,8 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user (mirrors production hardening; matches compose user 10001)
-RUN adduser --disabled-password --gecos '' --uid 10001 appuser
+# Non-root user (matches host uid 1000 for bind mount compatibility)
+RUN adduser --disabled-password --gecos '' --uid 1000 appuser
 
 WORKDIR /app
 
@@ -30,8 +30,9 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 COPY --chown=appuser:appuser . .
 
 # Runtime dirs bind-mounted in compose; ensure writable for non-root
-RUN mkdir -p /app/logs /app/state /app/.state /app/archive /app/.cache && \
-    chown -R appuser:appuser /app/logs /app/state /app/.state /app/archive /app/.cache
+RUN mkdir -p /app/logs /app/state /app/.state /app/archive /app/.cache/huggingface && \
+    chmod -R 777 /app/.cache && \
+    chown -R appuser:appuser /app/logs /app/state /app/.state /app/archive
 
 USER appuser
 
