@@ -1,248 +1,295 @@
+"""
+Unified document parser.
+Extracts text + minimal formatting metadata, then uses LLM to identify
+document structure (headings, content, tables).
+Works for any .docx or .pdf regardless of internal format.
+"""
+
 import os
 import re
+import json
+from collections import defaultdict
 from typing import List, Dict
-from docx import Document
-from PyPDF2 import PdfReader
 
 
-def _extract_table_text(table) -> str:
-    """
-    Convert DOCX table to readable text format.
-    
-    Args:
-        table: python-docx Table object
-        
-    Returns:
-        Formatted table text with headers and rows
-    """
-    rows = []
-    for row in table.rows:
-        cells = [cell.text.strip() for cell in row.cells]
-        rows.append(' | '.join(cells))
-    return '\n'.join(rows)
+# ── Extraction: DOCX ──────────────────────────────────────────────
 
+def _extract_docx_formatted(file_path: str) -> str:
+    """Extract DOCX text with minimal formatting markers.
 
-def parse_docx_structure(file_path: str) -> List[Dict]:
+    Only includes:
+    - [Heading N] for heading-styled paragraphs
+    - [Bold] for bold non-heading paragraphs
+    - Plain text for everything else
+    - [Table] for table rows
     """
-    Parse DOCX file and extract heading hierarchy.
-    
-    Returns:
-        List of sections with:
-        - section_path: "5.2" (hierarchical numeric path)
-        - heading_hierarchy: ["Policy", "Network Access"] (heading chain)
-        - content: "Remote access to corporate systems..." (section text)
-        - section_level: 2 (heading depth)
-        - is_heading: True/False
-        - is_table: True/False (NEW)
-    """
+    from docx import Document
+
     doc = Document(file_path)
-    sections = []
-    
-    # Track heading hierarchy
-    heading_stack = []  # [(level, title), ...]
-    section_counter = [0, 0, 0, 0, 0]  # Track up to 5 levels
-    has_first_heading = False  # Track if we've seen the first heading
-    
-    # Track current context for table insertion
-    current_path = '0'
-    current_hierarchy = ['Document Header']
-    
+    lines = []
+
     for para in doc.paragraphs:
-        style = para.style.name if para.style else 'None'
         text = para.text.strip()
-        
         if not text:
             continue
-        
+
+        style = para.style.name if para.style else 'Normal'
+        is_bold = any(run.bold for run in para.runs if run.bold)
+
         if 'Heading' in style:
-            # Extract heading level
-            level_match = re.search(r'Heading (\d+)', style)
-            level = int(level_match.group(1)) if level_match.group(1) else 1
-            
-            # Reset lower level counters
-            for j in range(level, len(section_counter)):
-                section_counter[j] = 0
-            
-            # Increment current level
-            section_counter[level - 1] += 1
-            
-            # Build section path
-            section_path = '.'.join(str(section_counter[j]) for j in range(level) if section_counter[j] > 0)
-            
-            # Update heading stack
-            # Remove any headings at this level or deeper
-            heading_stack = [(l, t) for l, t in heading_stack if l < level]
-            heading_stack.append((level, text))
-            
-            # Build heading hierarchy
-            heading_hierarchy = [t for l, t in heading_stack]
-            
-            # Update current context
-            current_path = section_path
-            current_hierarchy = heading_hierarchy
-            
-            has_first_heading = True
-            
-            sections.append({
-                'section_path': section_path,
-                'heading_hierarchy': heading_hierarchy,
-                'content': text,
-                'section_level': level,
-                'is_heading': True,
-                'is_table': False
-            })
+            lines.append(f"[{style}] {text}")
+        elif is_bold:
+            lines.append(f"[Bold] {text}")
         else:
-            # Content paragraph
-            if has_first_heading:
-                # We have a heading context
-                current_path = '.'.join(str(section_counter[j]) for j in range(len(section_counter)) if section_counter[j] > 0)
-                current_hierarchy = [t for l, t in heading_stack]
-            else:
-                # Before first heading - use "0" as section path
-                current_path = '0'
-                current_hierarchy = ['Document Header']
-            
-            sections.append({
-                'section_path': current_path,
-                'heading_hierarchy': current_hierarchy,
-                'content': text,
-                'section_level': len(heading_stack),
-                'is_heading': False,
-                'is_table': False
-            })
-    
-    # NEW: Parse tables and insert at correct position
+            lines.append(text)
+
     for table in doc.tables:
-        table_text = _extract_table_text(table)
-        if table_text.strip():
-            sections.append({
-                'section_path': current_path,
-                'heading_hierarchy': current_hierarchy,
-                'content': table_text,
-                'section_level': len(heading_stack),
-                'is_heading': False,
-                'is_table': True
-            })
-    
-    return sections
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells]
+            row_text = ' | '.join(c for c in cells if c)
+            if row_text:
+                lines.append(f"[Table] {row_text}")
+
+    return "\n".join(lines)
 
 
-def parse_pdf_structure(file_path: str) -> List[Dict]:
+# ── Extraction: PDF ───────────────────────────────────────────────
+
+def _extract_pdf_formatted(file_path: str) -> str:
+    """Extract PDF text with minimal formatting markers.
+
+    Only includes:
+    - [Bold, Npt] for bold lines
+    - [Npt] for non-bold lines (size rounded to integer)
     """
-    Parse PDF file and extract structure using font size heuristics.
-    
-    Returns:
-        List of sections with:
-        - section_path: "5.2" (hierarchical numeric path)
-        - heading_hierarchy: ["Policy", "Network Access"] (heading chain)
-        - content: "Remote access to corporate systems..." (section text)
-        - section_level: 2 (heading depth)
-        - is_heading: True/False
-    """
-    reader = PdfReader(file_path)
+    import pdfplumber
+
+    lines = []
+    with pdfplumber.open(file_path) as pdf:
+        for page in pdf.pages:
+            words = page.extract_words(extra_attrs=['size', 'fontname'])
+            if not words:
+                continue
+
+            by_top = defaultdict(list)
+            for w in words:
+                by_top[round(w['top'], 0)].append(w)
+
+            for top in sorted(by_top.keys()):
+                ws = by_top[top]
+                text = " ".join(w['text'] for w in ws).strip()
+                text = re.sub(r'\(cid:\d+\)', '', text).strip()
+                if not text:
+                    continue
+
+                size = round(max(w['size'] for w in ws))
+                is_bold = any('Bold' in w.get('fontname', '') for w in ws)
+
+                if is_bold:
+                    lines.append(f"[Bold, {size}pt] {text}")
+                else:
+                    lines.append(f"[{size}pt] {text}")
+
+    return "\n".join(lines)
+
+
+# ── Extraction: Dispatcher ────────────────────────────────────────
+
+def _extract_with_formatting(file_path: str) -> str:
+    """Dispatch to format-specific extraction."""
+    ext = os.path.splitext(file_path)[1].lower()
+
+    if ext == '.docx':
+        return _extract_docx_formatted(file_path)
+    elif ext == '.pdf':
+        return _extract_pdf_formatted(file_path)
+    else:
+        raise ValueError(f"Unsupported format: {ext}")
+
+
+# ── LLM Analysis ──────────────────────────────────────────────────
+
+STRUCTURE_PROMPT_DOCX = """You are a document structure analyzer for a Microsoft Word document.
+Each line has a formatting marker showing its Word style.
+
+Markers:
+- [Heading N] = heading at level N (this is the EXACT heading level — use it directly)
+- [Bold] = bold text (likely a table header, sub-heading, or label)
+- [Table] = table row (pipe-delimited cells)
+- No marker = plain body text
+
+Return a JSON array. Each element:
+  {"type": "heading", "level": N, "text": "..."}
+  {"type": "content", "text": "..."}
+
+RULES:
+1. Use [Heading N] directly — the N tells you the level. [Heading 1] = level 1, [Heading 2] = level 2, etc.
+2. [Bold] text that introduces a new topic is a heading — assign level based on context (usually one level deeper than the last heading).
+3. Group [Table] rows together as a single content block with all rows.
+4. Group related content paragraphs together (numbered sub-clauses under the same heading).
+5. Preserve ALL original text — do not summarize.
+6. Ignore page numbers, footers, and watermarks.
+7. Return ONLY the JSON array."""
+
+STRUCTURE_PROMPT_PDF = """You are a document structure analyzer for a PDF document.
+Each line has a font size marker showing its visual prominence.
+
+Markers:
+- [Bold, Npt] = bold text at N points (likely a heading)
+- [Npt] = regular text at N points
+- No marker = plain body text
+
+Return a JSON array. Each element:
+  {"type": "heading", "level": N, "text": "..."}
+  {"type": "content", "text": "..."}
+
+RULES:
+1. Headings have LARGER font sizes than body text. Compare sizes across the document:
+   - Largest size = level 1 (e.g., document title, PART/CHAPTER markers)
+   - Second largest = level 2 (e.g., Article/Section/Rule)
+   - Third largest = level 3 (e.g., sub-sections)
+   - Body text is the most common size — it is NOT a heading
+2. [Bold, Npt] text is likely a heading, especially if it's short (< 80 chars).
+3. Look for numbered patterns: "Article N", "Section N", "PART X", "Rule N", "Clause N" — these are headings.
+4. ALL CAPS short lines are likely headings.
+5. Group related sentences into content blocks — complete paragraphs or sets of sub-clauses.
+6. Preserve ALL original text — no summarizing.
+7. Ignore page numbers, footers, watermarks, and test fixture notices.
+8. If there are no clear headings, return all text as content blocks.
+9. Return ONLY the JSON array."""
+
+
+def _llm_analyze_structure(formatted_text: str, fmt: str = "docx") -> List[Dict]:
+    """Send formatted text to LLM, return parsed JSON array."""
+    import logging
+    from services.agents.tools.llm_tools import llm_generate, INGESTION_MODEL
+
+    prompt = STRUCTURE_PROMPT_DOCX if fmt == "docx" else STRUCTURE_PROMPT_PDF
+    sample = formatted_text[:8000]
+
+    result = llm_generate(
+        model=INGESTION_MODEL,
+        system_prompt=prompt,
+        user_message=f"Document text with formatting:\n\n{sample}",
+        temperature=0.0,
+        max_tokens=4096,
+        timeout=60.0,
+    )
+
+    if not result.success:
+        logging.getLogger("doc_parser").warning(f"LLM structure analysis failed: {result.error}")
+        return []
+
+    text = result.data.strip()
+    fenced = re.findall(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+    json_str = fenced[-1].strip() if fenced else text
+
+    try:
+        items = json.loads(json_str)
+    except json.JSONDecodeError:
+        match = re.search(r"\[.*\]", text, re.DOTALL)
+        if match:
+            try:
+                items = json.loads(match.group())
+            except json.JSONDecodeError:
+                return []
+        else:
+            return []
+
+    return items if isinstance(items, list) else []
+
+
+# ── Section Builder ───────────────────────────────────────────────
+
+def _build_sections(items: List[Dict]) -> List[Dict]:
+    """Convert LLM JSON output to section dicts (compatible with structure_chunker)."""
     sections = []
-    
-    # Track heading hierarchy
     heading_stack = []
     section_counter = [0, 0, 0, 0, 0]
-    
-    for page_num, page in enumerate(reader.pages):
-        # Extract text with basic structure detection
-        text = page.extract_text()
+    current_path = "0"
+    current_hierarchy = ["Document"]
+
+    for item in items:
+        text = item.get("text", "").strip()
         if not text:
             continue
-        
-        lines = text.split('\n')
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            
-            # Heuristic: Detect headings by characteristics
-            is_heading = False
-            level = 1
-            
-            # Check if line looks like a heading
-            # 1. Short line (< 80 chars)
-            # 2. Doesn't end with period
-            # 3. May be bold (can't detect in plain text)
-            # 4. May be centered (can't detect in plain text)
-            if len(line) < 80 and not line.endswith('.'):
-                # Additional heuristics
-                # - All caps or title case
-                # - Contains numbers at start (e.g., "1. Policy")
-                # - Common heading words
-                
-                if re.match(r'^\d+\.?\s+[A-Z]', line):
-                    # Numbered heading like "1. Policy" or "5.2 Network Access"
-                    is_heading = True
-                    # Extract level from number of dots
-                    dots = line.count('.')
-                    level = min(dots + 1, 5)
-                elif line.isupper() or (line.istitle() and len(line.split()) <= 5):
-                    # All caps or title case with few words
-                    is_heading = True
-                    level = 1
-            
-            if is_heading:
-                # Reset lower level counters
-                for j in range(level, len(section_counter)):
-                    section_counter[j] = 0
-                
-                # Increment current level
-                section_counter[level - 1] += 1
-                
-                # Build section path
-                section_path = '.'.join(str(section_counter[j]) for j in range(level) if section_counter[j] > 0)
-                
-                # Update heading stack
-                heading_stack = [(l, t) for l, t in heading_stack if l < level]
-                heading_stack.append((level, line))
-                
-                # Build heading hierarchy
-                heading_hierarchy = [t for l, t in heading_stack]
-                
-                sections.append({
-                    'section_path': section_path,
-                    'heading_hierarchy': heading_hierarchy,
-                    'content': line,
-                    'section_level': level,
-                    'is_heading': True,
-                    'page': page_num + 1
-                })
-            else:
-                # Content paragraph
-                current_path = '.'.join(str(section_counter[j]) for j in range(len(section_counter)) if section_counter[j] > 0)
-                heading_hierarchy = [t for l, t in heading_stack]
-                
-                sections.append({
-                    'section_path': current_path,
-                    'heading_hierarchy': heading_hierarchy,
-                    'content': line,
-                    'section_level': len(heading_stack),
-                    'is_heading': False,
-                    'page': page_num + 1
-                })
-    
+
+        item_type = item.get("type", "content")
+        level = int(item.get("level", 1))
+
+        if item_type == "heading":
+            for j in range(level, len(section_counter)):
+                section_counter[j] = 0
+            section_counter[level - 1] += 1
+
+            section_path = ".".join(
+                str(section_counter[j]) for j in range(level) if section_counter[j] > 0
+            )
+
+            heading_stack = [(l, t) for l, t in heading_stack if l < level]
+            heading_stack.append((level, text))
+            heading_hierarchy = [t for l, t in heading_stack]
+
+            current_path = section_path
+            current_hierarchy = heading_hierarchy
+
+            sections.append({
+                "section_path": section_path,
+                "heading_hierarchy": heading_hierarchy,
+                "content": text,
+                "section_level": level,
+                "is_heading": True,
+                "is_table": False,
+                "page": 0,
+            })
+        else:
+            sections.append({
+                "section_path": current_path or "0",
+                "heading_hierarchy": current_hierarchy,
+                "content": text,
+                "section_level": len(heading_stack),
+                "is_heading": False,
+                "is_table": False,
+                "page": 0,
+            })
+
     return sections
 
 
+# ── Main Entry Point ──────────────────────────────────────────────
+
 def parse_document_structure(file_path: str) -> List[Dict]:
-    """
-    Parse document structure based on file extension.
-    
-    Args:
-        file_path: Path to the document file
-        
-    Returns:
-        List of sections with structure information
+    """Parse any .docx or .pdf document.
+
+    Extracts text + minimal formatting metadata, sends to LLM for
+    structure analysis, returns section dicts for the chunker.
     """
     ext = os.path.splitext(file_path)[1].lower()
-    
-    if ext == '.docx':
-        return parse_docx_structure(file_path)
-    elif ext == '.pdf':
-        return parse_pdf_structure(file_path)
-    else:
-        raise ValueError(f"Unsupported file format: {ext}")
+    if ext not in ('.docx', '.pdf'):
+        raise ValueError(f"Unsupported format: {ext}")
+
+    try:
+        formatted = _extract_with_formatting(file_path)
+    except Exception as e:
+        raise ValueError(f"Failed to extract text: {e}")
+
+    if not formatted.strip():
+        return []
+
+    fmt = "docx" if ext == ".docx" else "pdf"
+    items = _llm_analyze_structure(formatted, fmt=fmt)
+
+    if items:
+        sections = _build_sections(items)
+        if sections:
+            return sections
+
+    return [{
+        "section_path": "0",
+        "heading_hierarchy": ["Document"],
+        "content": formatted[:50000],
+        "section_level": 0,
+        "is_heading": False,
+        "is_table": False,
+        "page": 0,
+    }]
