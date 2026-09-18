@@ -120,6 +120,8 @@ def chunk_document_clauses(
 
         if not content.strip():
             continue
+        if len(content.strip().split()) < 3:
+            continue
 
         # Use batch result if available, else single-section fallback
         current_pos = non_heading_sections.index(section) if section in non_heading_sections else 0
@@ -184,7 +186,7 @@ def chunk_document_clauses(
 
 
 def _merge_micro_chunks(chunks: List[Dict], max_tokens: int, overlap: int) -> List[Dict]:
-    """Merge chunks below MIN_CLAUSE_TOKENS into their neighbors."""
+    """Merge chunks below MIN_CLAUSE_TOKENS — only within same section_path."""
     if not chunks:
         return chunks
 
@@ -193,54 +195,38 @@ def _merge_micro_chunks(chunks: List[Dict], max_tokens: int, overlap: int) -> Li
 
     for chunk in chunks:
         token_count = chunk.get('token_count', 0)
+        current_path = chunk.get('section_path', '')
 
         if token_count < MIN_CLAUSE_TOKENS:
             if buffer is None:
                 buffer = dict(chunk)
-            else:
+            elif buffer.get('section_path') == current_path:
                 buffer['text'] = buffer['text'] + " " + chunk['text']
                 buffer['token_count'] = len(buffer['text'].split())
+            else:
+                if buffer['token_count'] < max_tokens:
+                    merged.append(buffer)
+                else:
+                    for sub in _split_long_clause_with_overlap(buffer['text'], max_tokens, overlap):
+                        merged.append({
+                            'section_path': buffer['section_path'],
+                            'clause_ref': buffer['clause_ref'],
+                            'heading_hierarchy': buffer['heading_hierarchy'],
+                            'text': sub,
+                            'token_count': len(sub.split()),
+                            'page': buffer.get('page'),
+                            'clause_number': buffer.get('clause_number', 0),
+                            'is_table': buffer.get('is_table', False),
+                        })
+                buffer = dict(chunk)
         else:
             if buffer is not None:
-                merged_text = buffer['text'] + " " + chunk['text']
-                merged_tokens = len(merged_text.split())
-                if merged_tokens <= max_tokens:
-                    merged.append({
-                        'section_path': chunk['section_path'],
-                        'clause_ref': chunk['clause_ref'],
-                        'heading_hierarchy': chunk['heading_hierarchy'],
-                        'text': merged_text,
-                        'token_count': merged_tokens,
-                        'page': chunk['page'],
-                        'clause_number': chunk.get('clause_number', 0),
-                        'is_table': chunk.get('is_table', False),
-                    })
-                else:
-                    sub_clauses = _split_long_clause_with_overlap(
-                        merged_text, max_tokens, overlap
-                    )
-                    for sub_text in sub_clauses:
-                        merged.append({
-                            'section_path': chunk['section_path'],
-                            'clause_ref': chunk['clause_ref'],
-                            'heading_hierarchy': chunk['heading_hierarchy'],
-                            'text': sub_text,
-                            'token_count': len(sub_text.split()),
-                            'page': chunk['page'],
-                            'clause_number': chunk.get('clause_number', 0),
-                            'is_table': chunk.get('is_table', False),
-                        })
+                merged.append(buffer)
                 buffer = None
-            else:
-                merged.append(chunk)
+            merged.append(chunk)
 
     if buffer is not None:
-        if merged:
-            prev = merged[-1]
-            prev['text'] = prev['text'] + " " + buffer['text']
-            prev['token_count'] = len(prev['text'].split())
-        else:
-            merged.append(buffer)
+        merged.append(buffer)
 
     return merged
 

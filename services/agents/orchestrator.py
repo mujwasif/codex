@@ -41,6 +41,7 @@ class QueryIntent(enum.Enum):
     COMPLIANCE = "compliance"
     PROCEDURE = "procedure"
     CONVERSATIONAL = "conversational"
+    SUMMARY = "summary"
 
 
 @dataclass
@@ -82,6 +83,9 @@ class QueryContext:
 
     # Agent chain trace (recorded by run_pipeline)
     chain: List[Dict[str, Any]] = field(default_factory=list)
+
+    # Multi-intent results (filled by run_pipeline when multiple intents)
+    intent_results: Dict[str, Any] = field(default_factory=dict)
 
 
     error: Optional[str] = None
@@ -409,11 +413,11 @@ def _is_bare_followup(question: str) -> bool:
 def classify_intent(
     question: str,
     prior_intent: Optional[QueryIntent] = None,
-) -> tuple[QueryIntent, float, Optional[str], List[str]]:
+) -> tuple[List[QueryIntent], float, Optional[str], List[str]]:
     """
-    CoT classification: intent + conflict_type + document phrases.
+    CoT classification: list of intents + conflict_type + document phrases.
     Single LLM call with chain-of-thought. Returns
-    (intent, confidence, conflict_type, doc_phrases).
+    (intents, confidence, conflict_type, doc_phrases).
 
     For CONFLICT intent, determines subtype:
       0 docs → type_1, 1 doc → type_2b, 2+ docs → type_2
@@ -421,14 +425,14 @@ def classify_intent(
     import json as _json
 
     if _is_bare_followup(question) and prior_intent is not None:
-        return prior_intent, 0.65, None, []
+        return [prior_intent], 0.65, None, []
 
-    VALID_INTENTS = {"approval", "conflict", "compliance", "procedure", "general", "conversational"}
+    VALID_INTENTS = {"approval", "conflict", "compliance", "procedure", "general", "conversational", "summary"}
 
-    prompt = f"""Classify the user's question into one of 6 intents.
+    prompt = f"""Classify the user's question into one or more intents.
 
-CRITICAL: The "intent" field MUST be exactly ONE of these 6 words (lowercase):
-  approval, conflict, compliance, procedure, general, conversational
+CRITICAL: The "intents" field MUST be a JSON array of one or more of these 7 words (lowercase):
+  approval, conflict, compliance, procedure, general, conversational, summary
 
 Conflict subtypes (only when intent is "conflict"):
   type_1  — 0 document names → generic corpus search
@@ -541,7 +545,15 @@ Q: "What does the Backup Policy require?"
 
 Q: "Hello"
 → Thinking: User is greeting, no substantive question.
-→ {{"intent":"conversational","confidence":0.99,"conflict_type":null,"doc_phrases":[]}}
+→ {{"intents":["conversational"],"confidence":0.99,"conflict_type":null,"doc_phrases":[]}}
+
+Q: "Who can approve a purchase over $10,000 and is this compliant with data protection regulations?"
+→ Thinking: User asks about approval authority AND compliance. Two intents apply.
+→ {{"intents":["approval","compliance"],"confidence":0.91,"conflict_type":null,"doc_phrases":[]}}
+
+Q: "Summarize the Backup Policy"
+→ Thinking: User wants a summary of a specific named policy.
+→ {{"intents":["summary"],"confidence":0.95,"conflict_type":null,"doc_phrases":["Backup Policy"]}}
 
 ---
 
@@ -550,7 +562,7 @@ Q: "{question}"
 
     result = llm_generate(
         model=AGENT_MODEL,
-        system_prompt='Think step by step about the user intent. Output a "→ Thinking:" line with your reasoning, then output ONLY the JSON object. The "intent" field MUST be exactly one of: approval, conflict, compliance, procedure, general, conversational.',
+        system_prompt='Think step by step about the user intent. Output a "→ Thinking:" line with your reasoning, then output ONLY the JSON object. The "intents" field MUST be a JSON array of one or more of: approval, conflict, compliance, procedure, general, conversational, summary.',
         user_message=prompt,
         temperature=0.0,
         max_tokens=2048,
@@ -565,6 +577,7 @@ Q: "{question}"
         "procedure": QueryIntent.PROCEDURE,
         "general": QueryIntent.GENERAL,
         "conversational": QueryIntent.CONVERSATIONAL,
+        "summary": QueryIntent.SUMMARY,
     }
 
     if result.success:
@@ -577,22 +590,35 @@ Q: "{question}"
             parsed = _json.loads(raw)
             if isinstance(parsed, list) and parsed:
                 parsed = parsed[0]
-            raw_intent = parsed.get("intent", "").lower().strip()
             confidence = float(parsed.get("confidence", 0.5))
             conflict_type = parsed.get("conflict_type")
             doc_phrases = [str(p).strip() for p in parsed.get("doc_phrases", []) if p]
 
-            # Validate: intent must be a known label, not hallucinated text
-            if raw_intent not in intent_map:
-                # Try to rescue: scan the raw output for a valid intent keyword
-                for kw in intent_map:
-                    if kw in raw.lower():
-                        raw_intent = kw
-                        break
+            # Parse intents — support both "intents": [...] and legacy "intent": "..."
+            raw_intents = parsed.get("intents", [])
+            if not raw_intents:
+                legacy = parsed.get("intent", "")
+                if legacy:
+                    raw_intents = [legacy]
+            if isinstance(raw_intents, str):
+                raw_intents = [raw_intents]
 
-            if raw_intent in intent_map:
+            # Validate and map
+            intents = []
+            for ri in raw_intents:
+                ri = str(ri).lower().strip()
+                if ri in intent_map:
+                    intents.append(intent_map[ri])
+                else:
+                    # Rescue: scan raw output for valid keyword
+                    for kw in intent_map:
+                        if kw in raw.lower() and intent_map[kw] not in intents:
+                            intents.append(intent_map[kw])
+                            break
+
+            if intents:
                 return (
-                    intent_map[raw_intent],
+                    intents,
                     round(min(max(confidence, 0.0), 1.0), 4),
                     conflict_type,
                     doc_phrases,
@@ -600,7 +626,7 @@ Q: "{question}"
         except (_json.JSONDecodeError, ValueError, KeyError):
             pass
 
-    return QueryIntent.GENERAL, 0.1, None, []
+    return [QueryIntent.GENERAL], 0.1, None, []
 
 
 # ═══════════════════════════════════════
@@ -1177,20 +1203,163 @@ def agent_resolve_docs(ctx: QueryContext):
 
 
 # ═══════════════════════════════════════
-#  Pipeline Definition
+#  Intent Tools
 # ═══════════════════════════════════════
 
-DEFAULT_PIPELINE = [agent_retrieve, agent_reason, agent_verify]
+from services.agents.tools.base import ToolResult, get_registry
 
-INTENT_PIPELINES = {
-    QueryIntent.APPROVAL: [agent_resolve_docs, agent_retrieve, agent_approval, agent_reason, agent_verify],
-    QueryIntent.CONFLICT: [agent_resolve_docs, agent_conflict_check, agent_reason, agent_verify],
-    QueryIntent.COMPLIANCE: [agent_resolve_docs, agent_retrieve, agent_risk_compliance, agent_reason, agent_verify],
-    QueryIntent.PROCEDURE: [agent_resolve_docs, agent_retrieve, agent_procedure_reason, agent_verify],
-    QueryIntent.GENERAL: [agent_resolve_docs, agent_retrieve, agent_reason, agent_verify],
-    QueryIntent.CONVERSATIONAL: [agent_conversational],
-}
 
+def _register_intent_tools():
+    """Register all intent tools with the tool registry."""
+    registry = get_registry()
+
+    def _tool_general(ctx: QueryContext = None, **kw) -> ToolResult:
+        c = ctx or kw.get("ctx")
+        if not c:
+            return ToolResult(success=False, error="No context")
+        agent_reason(c)
+        agent_verify(c)
+        return ToolResult(success=c.state != QueryState.ABSTAINED, data={
+            "answer": c.answer, "verdict": c.verdict,
+            "confidence": c.confidence, "citations": c.citations,
+        })
+
+    def _tool_approval(ctx: QueryContext = None, **kw) -> ToolResult:
+        c = ctx or kw.get("ctx")
+        if not c:
+            return ToolResult(success=False, error="No context")
+        agent_approval(c)
+        agent_reason(c)
+        agent_verify(c)
+        return ToolResult(success=c.state != QueryState.ABSTAINED, data={
+            "answer": c.answer, "verdict": c.verdict,
+            "confidence": c.confidence, "citations": c.citations,
+            "approval": c.approval_result,
+        })
+
+    def _tool_conflict(ctx: QueryContext = None, **kw) -> ToolResult:
+        c = ctx or kw.get("ctx")
+        if not c:
+            return ToolResult(success=False, error="No context")
+        agent_conflict_check(c)
+        agent_reason(c)
+        agent_verify(c)
+        return ToolResult(success=c.state != QueryState.ABSTAINED, data={
+            "answer": c.answer, "verdict": c.verdict,
+            "confidence": c.confidence, "citations": c.citations,
+            "conflicts": c.conflicts, "conflict_analysis": c.conflict_analysis,
+        })
+
+    def _tool_compliance(ctx: QueryContext = None, **kw) -> ToolResult:
+        c = ctx or kw.get("ctx")
+        if not c:
+            return ToolResult(success=False, error="No context")
+        agent_risk_compliance(c)
+        agent_reason(c)
+        agent_verify(c)
+        return ToolResult(success=c.state != QueryState.ABSTAINED, data={
+            "answer": c.answer, "verdict": c.verdict,
+            "confidence": c.confidence, "citations": c.citations,
+            "risk": c.risk_result,
+        })
+
+    def _tool_procedure(ctx: QueryContext = None, **kw) -> ToolResult:
+        c = ctx or kw.get("ctx")
+        if not c:
+            return ToolResult(success=False, error="No context")
+        agent_procedure_reason(c)
+        if not c.answer:
+            agent_reason(c)
+        agent_verify(c)
+        return ToolResult(success=c.state != QueryState.ABSTAINED, data={
+            "answer": c.answer, "verdict": c.verdict,
+            "confidence": c.confidence, "citations": c.citations,
+        })
+
+    def _tool_conversational(ctx: QueryContext = None, **kw) -> ToolResult:
+        c = ctx or kw.get("ctx")
+        if not c:
+            return ToolResult(success=False, error="No context")
+        agent_conversational(c)
+        return ToolResult(success=True, data={
+            "answer": c.answer, "verdict": c.verdict,
+            "confidence": c.confidence, "citations": [],
+        })
+
+    def _tool_summary(ctx: QueryContext = None, **kw) -> ToolResult:
+        c = ctx or kw.get("ctx")
+        if not c:
+            return ToolResult(success=False, error="No context")
+        if not c.resolved_doc_ids:
+            c.answer = "I couldn't identify which document you'd like summarized. Please specify the policy name."
+            c.verdict = "abstained"
+            c.confidence = 0.0
+            return ToolResult(success=False, data={
+                "answer": c.answer, "verdict": "abstained",
+                "confidence": 0.0, "citations": [],
+            })
+        from services.api.search import fetch_chunks_by_document
+        doc_id = c.resolved_doc_ids[0]
+        all_chunks = fetch_chunks_by_document([doc_id], c.access_level)
+        c.chunks = all_chunks.get(doc_id, [])
+        if not c.chunks:
+            c.answer = "I couldn't retrieve content from that document."
+            c.verdict = "abstained"
+            return ToolResult(success=False, data={
+                "answer": c.answer, "verdict": "abstained",
+                "confidence": 0.0, "citations": [],
+            })
+        agent_reason(c)
+        agent_verify(c)
+        return ToolResult(success=c.state != QueryState.ABSTAINED, data={
+            "answer": c.answer, "verdict": c.verdict,
+            "confidence": c.confidence, "citations": c.citations,
+        })
+
+    registry.register("intent_general", _tool_general, failure_threshold=2)
+    registry.register("intent_approval", _tool_approval, failure_threshold=2)
+    registry.register("intent_conflict", _tool_conflict, failure_threshold=2)
+    registry.register("intent_compliance", _tool_compliance, failure_threshold=2)
+    registry.register("intent_procedure", _tool_procedure, failure_threshold=2)
+    registry.register("intent_conversational", _tool_conversational, failure_threshold=2)
+    registry.register("intent_summary", _tool_summary, failure_threshold=2)
+
+
+# Register tools at module load
+_register_intent_tools()
+
+
+def _merge_results(question: str, intent_results: dict) -> str:
+    """Merge multiple intent results into one coherent answer."""
+    parts = []
+    for intent, result in intent_results.items():
+        if result.success and result.data.get("answer"):
+            parts.append(f"**{intent.value.title()}:** {result.data['answer']}")
+
+    if len(parts) == 1:
+        return parts[0]
+
+    merged_text = "\n\n".join(parts)
+
+    result = llm_generate(
+        model=AGENT_MODEL,
+        system_prompt=(
+            "You are merging answers from multiple policy analysis tools into "
+            "one clear, cohesive response. Keep all facts and citations. "
+            "Remove repetition. Structure logically. Do not use emojis."
+        ),
+        user_message=f"Question: {question}\n\nTool answers:\n{merged_text}",
+        temperature=0.0,
+        max_tokens=4096,
+        timeout=30.0,
+    )
+
+    return result.data if result.success else merged_text
+
+
+# ═══════════════════════════════════════
+#  Pipeline
+# ═══════════════════════════════════════
 
 def run_pipeline(
     question: str,
@@ -1203,13 +1372,10 @@ def run_pipeline(
     selected_doc_ids: Optional[List[str]] = None,
 ) -> QueryContext:
     """
-    Two-phase query pipeline:
+    Multi-intent query pipeline using registered tools.
 
-    Phase 1 (no selected_doc_ids):
-      Classify intent → resolve docs → if type_2/2b, pause and return candidates
-
-    Phase 2 (with selected_doc_ids):
-      Run conflict analysis on user-selected documents
+    Phase 1: Classify intents → shared steps → run intent tools → merge
+    Phase 2 (selected_doc_ids): Conflict analysis on user-selected documents
     """
     ctx = QueryContext(
         question=question,
@@ -1224,73 +1390,109 @@ def run_pipeline(
     # Phase 2: User selected documents — run conflict analysis
     if selected_doc_ids and prior_intent == QueryIntent.CONFLICT:
         ctx.intent = QueryIntent.CONFLICT
-        ctx.intent_confidence = 1.0  # confirmed by user document selection
+        ctx.intent_confidence = 1.0
         ctx.resolved_doc_ids = selected_doc_ids
         ctx.state = QueryState.CLASSIFIED
 
-        # Determine conflict subtype from selection count
         if len(selected_doc_ids) == 1:
             ctx.conflict_type = "type_2b"
         elif len(selected_doc_ids) >= 2:
             ctx.conflict_type = "type_2"
 
-        pipeline = [agent_conflict_check, agent_reason, agent_verify]
-        for agent_fn in pipeline:
-            if ctx.state == QueryState.ABSTAINED:
-                break
-            agent_start = time.time()
-            agent_fn(ctx)
-            ctx.chain.append({
-                "agent": agent_fn.__name__,
-                "state": ctx.state.value,
-                "latency_ms": int((time.time() - agent_start) * 1000),
-                "output": ctx.verdict if agent_fn.__name__ == "agent_verify" else None,
-            })
+        result = get_registry().call("intent_conflict", ctx=ctx)
+        if result.success and result.data.get("answer"):
+            ctx.answer = result.data["answer"]
+            ctx.verdict = result.data.get("verdict", "abstained")
+            ctx.confidence = result.data.get("confidence", 0.0)
+            ctx.citations = result.data.get("citations", [])
+            ctx.conflicts = result.data.get("conflicts", [])
+            ctx.conflict_analysis = result.data.get("conflict_analysis", {})
 
         if ctx.state != QueryState.ABSTAINED:
             ctx.state = QueryState.DONE
         ctx.stop_timer()
         return ctx
 
-    # Phase 1: Classify intent + extract doc phrases (single CoT call)
-    ctx.intent, ctx.intent_confidence, ctx.conflict_type, ctx.doc_phrases = classify_intent(
+    # Phase 1: Classify intents
+    intents, confidence, conflict_type, doc_phrases = classify_intent(
         ctx.raw_question or ctx.question,
         prior_intent=prior_intent,
     )
+    ctx.intent = intents[0] if intents else QueryIntent.GENERAL
+    ctx.intent_confidence = confidence
+    ctx.conflict_type = conflict_type
+    ctx.doc_phrases = doc_phrases
     ctx.state = QueryState.CLASSIFIED
 
-    # Select pipeline
-    pipeline = INTENT_PIPELINES.get(ctx.intent, DEFAULT_PIPELINE)
+    # Shared step: resolve document names (all intents except conversational)
+    if QueryIntent.CONVERSATIONAL not in intents:
+        agent_resolve_docs(ctx)
 
-    # Execute agents
-    for agent_fn in pipeline:
-        if ctx.state in (QueryState.ABSTAINED, QueryState.AWAITING_SELECTION):
-            break
-        agent_start = time.time()
-        agent_fn(ctx)
-        ctx.chain.append({
-            "agent": agent_fn.__name__,
-            "state": ctx.state.value,
-            "latency_ms": int((time.time() - agent_start) * 1000),
-            "output": ctx.verdict if agent_fn.__name__ == "agent_verify" else None,
-        })
+    # CONVERSATIONAL is standalone
+    if intents == [QueryIntent.CONVERSATIONAL]:
+        result = get_registry().call("intent_conversational", ctx=ctx)
+        if result.success and result.data.get("answer"):
+            ctx.answer = result.data["answer"]
+            ctx.verdict = result.data.get("verdict", "clear")
+            ctx.confidence = result.data.get("confidence", 1.0)
+        ctx.state = QueryState.DONE
+        ctx.stop_timer()
+        return ctx
 
-        # Pause after resolve_docs for type_2 and type_2b
-        if (agent_fn.__name__ == "agent_resolve_docs"
-                and ctx.state != QueryState.ABSTAINED
-                and ctx.intent == QueryIntent.CONFLICT
-                and ctx.conflict_type in ("type_2", "type_2b")
-                and not selected_doc_ids
-                and ctx.doc_slots):
-            ctx.verdict = "pending_selection"
-            ctx.answer = (
-                "I found matching documents for your conflict query. "
-                "Please select which documents you want to compare from the options below."
-            )
-            ctx.state = QueryState.AWAITING_SELECTION
-            break
+    # CONFLICT with document selection → pause for user input
+    if (QueryIntent.CONFLICT in intents
+            and ctx.conflict_type in ("type_2", "type_2b")
+            and not selected_doc_ids
+            and ctx.doc_slots):
+        ctx.verdict = "pending_selection"
+        ctx.answer = (
+            "I found matching documents for your query. "
+            "Please select which documents you want to analyze from the options below."
+        )
+        ctx.state = QueryState.AWAITING_SELECTION
+        ctx.stop_timer()
+        return ctx
 
-    # Step 4: Final state
+    # Shared step: retrieve chunks (all intents except CONFLICT)
+    if QueryIntent.CONFLICT not in intents:
+        agent_retrieve(ctx)
+
+    # Execute intent tools
+    if len(intents) == 1:
+        tool_name = f"intent_{intents[0].value}"
+        result = get_registry().call(tool_name, ctx=ctx)
+        if result.success and result.data.get("answer"):
+            ctx.answer = result.data["answer"]
+            ctx.verdict = result.data.get("verdict", "abstained")
+            ctx.confidence = result.data.get("confidence", 0.0)
+            ctx.citations = result.data.get("citations", [])
+            # Copy intent-specific fields
+            if "approval" in result.data:
+                ctx.approval_result = result.data["approval"]
+            if "conflicts" in result.data:
+                ctx.conflicts = result.data["conflicts"]
+            if "conflict_analysis" in result.data:
+                ctx.conflict_analysis = result.data["conflict_analysis"]
+            if "risk" in result.data:
+                ctx.risk_result = result.data["risk"]
+    else:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {}
+            for intent in intents:
+                tool_name = f"intent_{intent.value}"
+                futures[executor.submit(get_registry().call, tool_name, ctx=ctx)] = intent
+
+            intent_results = {}
+            for future in as_completed(futures):
+                intent = futures[future]
+                intent_results[intent] = future.result()
+
+        ctx.intent_results = intent_results
+        ctx.answer = _merge_results(ctx.raw_question, intent_results)
+
+    # Final state
     if ctx.state != QueryState.ABSTAINED:
         ctx.state = QueryState.DONE
 

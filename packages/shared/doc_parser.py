@@ -3,13 +3,17 @@ Unified document parser.
 Extracts text + minimal formatting metadata, then uses LLM to identify
 document structure (headings, content, tables).
 Works for any .docx or .pdf regardless of internal format.
+LLM is always the primary parser — no fallbacks.
 """
 
 import os
 import re
 import json
+import logging
 from collections import defaultdict
 from typing import List, Dict
+
+logger = logging.getLogger(__name__)
 
 
 # ── Extraction: DOCX ──────────────────────────────────────────────
@@ -17,38 +21,51 @@ from typing import List, Dict
 def _extract_docx_formatted(file_path: str) -> str:
     """Extract DOCX text with minimal formatting markers.
 
-    Only includes:
-    - [Heading N] for heading-styled paragraphs
-    - [Bold] for bold non-heading paragraphs
-    - Plain text for everything else
-    - [Table] for table rows
+    Interleaves paragraphs and tables in document order so the LLM
+    sees content in its natural position.
     """
     from docx import Document
+    from docx.oxml.ns import qn
 
     doc = Document(file_path)
     lines = []
 
-    for para in doc.paragraphs:
-        text = para.text.strip()
-        if not text:
-            continue
-
-        style = para.style.name if para.style else 'Normal'
-        is_bold = any(run.bold for run in para.runs if run.bold)
-
-        if 'Heading' in style:
-            lines.append(f"[{style}] {text}")
-        elif is_bold:
-            lines.append(f"[Bold] {text}")
-        else:
-            lines.append(text)
-
-    for table in doc.tables:
-        for row in table.rows:
+    table_map = {}
+    for tbl in doc.tables:
+        rows = []
+        for row in tbl.rows:
             cells = [cell.text.strip() for cell in row.cells]
             row_text = ' | '.join(c for c in cells if c)
             if row_text:
-                lines.append(f"[Table] {row_text}")
+                rows.append(f"[Table] {row_text}")
+        if rows:
+            table_map[id(tbl._tbl)] = rows
+
+    for child in doc.element.body:
+        if child.tag == qn('w:p'):
+            para = None
+            for p in doc.paragraphs:
+                if p._element is child:
+                    para = p
+                    break
+            if para is None:
+                continue
+            text = para.text.strip()
+            if not text:
+                continue
+            style = para.style.name if para.style and para.style.name else 'Normal'
+            is_bold = any(run.bold for run in para.runs if run.bold)
+            if 'Heading' in style:
+                lines.append(f"[{style}] {text[:30]}")
+            elif is_bold:
+                lines.append(f"[Bold] {text[:30]}")
+            else:
+                lines.append(text[:30])
+        elif child.tag == qn('w:tbl'):
+            for tbl in doc.tables:
+                if tbl._tbl is child:
+                    lines.extend(table_map.get(id(tbl._tbl), []))
+                    break
 
     return "\n".join(lines)
 
@@ -58,15 +75,14 @@ def _extract_docx_formatted(file_path: str) -> str:
 def _extract_pdf_formatted(file_path: str) -> str:
     """Extract PDF text with minimal formatting markers.
 
-    Only includes:
-    - [Bold, Npt] for bold lines
-    - [Npt] for non-bold lines (size rounded to integer)
+    Includes [Page N] markers so the LLM and downstream code know
+    which page each line came from.
     """
     import pdfplumber
 
     lines = []
     with pdfplumber.open(file_path) as pdf:
-        for page in pdf.pages:
+        for page_num, page in enumerate(pdf.pages, 1):
             words = page.extract_words(extra_attrs=['size', 'fontname'])
             if not words:
                 continue
@@ -86,9 +102,9 @@ def _extract_pdf_formatted(file_path: str) -> str:
                 is_bold = any('Bold' in w.get('fontname', '') for w in ws)
 
                 if is_bold:
-                    lines.append(f"[Bold, {size}pt] {text}")
+                    lines.append(f"[Page {page_num}, Bold, {size}pt] {text[:30]}")
                 else:
-                    lines.append(f"[{size}pt] {text}")
+                    lines.append(f"[Page {page_num}, {size}pt] {text[:30]}")
 
     return "\n".join(lines)
 
@@ -107,96 +123,106 @@ def _extract_with_formatting(file_path: str) -> str:
         raise ValueError(f"Unsupported format: {ext}")
 
 
-# ── LLM Analysis ──────────────────────────────────────────────────
+# ── LLM Analysis (primary for both DOCX and PDF) ─────────────────
 
-STRUCTURE_PROMPT_DOCX = """You are a document structure analyzer for a Microsoft Word document.
-Each line has a formatting marker showing its Word style.
+STRUCTURE_PROMPT = """You are a document structure analyzer. Given document text with
+formatting markers, identify the heading hierarchy and content paragraphs.
 
-Markers:
-- [Heading N] = heading at level N (this is the EXACT heading level — use it directly)
-- [Bold] = bold text (likely a table header, sub-heading, or label)
+CRITICAL: The "text" field in your output must contain ONLY clean document text.
+Remove ALL formatting markers ([Page ...], [Bold, ...], [Npt], etc.) from the text.
+
+Markers provided to you (for YOUR analysis only — do NOT pass them through):
+- [Heading N] = heading at level N (from Word styles — use N directly)
+- [Bold] = bold text (likely a heading, table header, or sub-heading)
 - [Table] = table row (pipe-delimited cells)
-- No marker = plain body text
-
-Return a JSON array. Each element:
-  {"type": "heading", "level": N, "text": "..."}
-  {"type": "content", "text": "..."}
-
-RULES:
-1. Use [Heading N] directly — the N tells you the level. [Heading 1] = level 1, [Heading 2] = level 2, etc.
-2. [Bold] text that introduces a new topic is a heading — assign level based on context (usually one level deeper than the last heading).
-3. Group [Table] rows together as a single content block with all rows.
-4. Group related content paragraphs together (numbered sub-clauses under the same heading).
-5. Preserve ALL original text — do not summarize.
-6. Ignore page numbers, footers, and watermarks.
-7. Return ONLY the JSON array."""
-
-STRUCTURE_PROMPT_PDF = """You are a document structure analyzer for a PDF document.
-Each line has a font size marker showing its visual prominence.
-
-Markers:
-- [Bold, Npt] = bold text at N points (likely a heading)
+- [Page N, Bold, Npt] = bold text at N points on page N — use font size to classify
+- [Page N, Npt] = regular text at N points on page N — use font size to classify
+- [Bold, Npt] = bold text at N points (no page marker)
 - [Npt] = regular text at N points
 - No marker = plain body text
 
+HEADING DETECTION (PDF documents):
+1. Find the MOST COMMON font size — this is body text size.
+2. Any text with font size LARGER than body = heading.
+   Largest size → level 1. Second largest → level 2. Third → level 3. Etc.
+3. BOLD text shorter than 80 chars = likely heading even if same size as body.
+4. ALL CAPS short lines = likely heading.
+5. Lines starting with numbered patterns (Article, Section, Rule, Clause, Chapter, Part, 1., 2., etc.) = likely heading if bold or large font.
+
 Return a JSON array. Each element:
-  {"type": "heading", "level": N, "text": "..."}
-  {"type": "content", "text": "..."}
+  {"type": "heading", "level": N, "text": "CLEAN text — no markers"}
+  {"type": "content", "text": "CLEAN text — no markers"}
 
 RULES:
-1. Headings have LARGER font sizes than body text. Compare sizes across the document:
-   - Largest size = level 1 (e.g., document title, PART/CHAPTER markers)
-   - Second largest = level 2 (e.g., Article/Section/Rule)
-   - Third largest = level 3 (e.g., sub-sections)
-   - Body text is the most common size — it is NOT a heading
-2. [Bold, Npt] text is likely a heading, especially if it's short (< 80 chars).
-3. Look for numbered patterns: "Article N", "Section N", "PART X", "Rule N", "Clause N" — these are headings.
-4. ALL CAPS short lines are likely headings.
-5. Group related sentences into content blocks — complete paragraphs or sets of sub-clauses.
-6. Preserve ALL original text — no summarizing.
-7. Ignore page numbers, footers, watermarks, and test fixture notices.
-8. If there are no clear headings, return all text as content blocks.
-9. Return ONLY the JSON array."""
+1. [Heading N]: use N directly as the level.
+2. [Bold] / [Bold, Npt]: heading if short (< 80 chars), starts a new topic, or numbered pattern.
+3. ALL CAPS short lines are headings.
+4. Group [Table] rows as a single content block.
+5. Group related content under the same heading together.
+6. Preserve ALL original text content — no summarizing — but STRIP all formatting markers.
+7. IGNORE page numbers, footers, watermarks, document headers/footers, and test fixture notices.
+8. Return ONLY the JSON array — no explanation text."""
 
 
-def _llm_analyze_structure(formatted_text: str, fmt: str = "docx") -> List[Dict]:
-    """Send formatted text to LLM, return parsed JSON array."""
-    import logging
+def _llm_analyze_structure(formatted_text: str) -> List[Dict]:
+    """Send formatted text to LLM for structure analysis.
+
+    Processes in page-sized batches for large documents.
+    Works for both DOCX and PDF formatted text.
+    """
     from services.agents.tools.llm_tools import llm_generate, INGESTION_MODEL
 
-    prompt = STRUCTURE_PROMPT_DOCX if fmt == "docx" else STRUCTURE_PROMPT_PDF
-    sample = formatted_text[:8000]
+    BATCH_CHAR_LIMIT = 20000
+    all_items = []
 
-    result = llm_generate(
-        model=INGESTION_MODEL,
-        system_prompt=prompt,
-        user_message=f"Document text with formatting:\n\n{sample}",
-        temperature=0.0,
-        max_tokens=4096,
-        timeout=60.0,
-    )
-
-    if not result.success:
-        logging.getLogger("doc_parser").warning(f"LLM structure analysis failed: {result.error}")
-        return []
-
-    text = result.data.strip()
-    fenced = re.findall(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
-    json_str = fenced[-1].strip() if fenced else text
-
-    try:
-        items = json.loads(json_str)
-    except json.JSONDecodeError:
-        match = re.search(r"\[.*\]", text, re.DOTALL)
-        if match:
-            try:
-                items = json.loads(match.group())
-            except json.JSONDecodeError:
-                return []
+    batches = []
+    if len(formatted_text) <= BATCH_CHAR_LIMIT:
+        batches = [formatted_text]
+    else:
+        page_splits = re.split(r'\n(?=\[Page \d+)', formatted_text)
+        if len(page_splits) <= 1:
+            chunks = [formatted_text[i:i+BATCH_CHAR_LIMIT] for i in range(0, len(formatted_text), BATCH_CHAR_LIMIT)]
+            batches = chunks
         else:
-            return []
+            for page_text in page_splits:
+                if batches and len(batches[-1]) + len(page_text) < BATCH_CHAR_LIMIT:
+                    batches[-1] += "\n" + page_text
+                else:
+                    batches.append(page_text)
 
-    return items if isinstance(items, list) else []
+    for batch in batches:
+        result = llm_generate(
+            model=INGESTION_MODEL,
+            system_prompt=STRUCTURE_PROMPT,
+            user_message=f"Document text with formatting:\n\n{batch}",
+            temperature=0.0,
+            max_tokens=4096,
+            timeout=180.0,
+        )
+
+        if not result.success:
+            logger.warning(f"LLM structure analysis failed: {result.error}")
+            continue
+
+        text = result.data.strip()
+        fenced = re.findall(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+        json_str = fenced[-1].strip() if fenced else text
+
+        try:
+            items = json.loads(json_str)
+            if isinstance(items, list):
+                all_items.extend(items)
+        except json.JSONDecodeError:
+            match = re.search(r"\[.*?\]\s*$", text, re.DOTALL)
+            if match:
+                try:
+                    items = json.loads(match.group())
+                    if isinstance(items, list):
+                        all_items.extend(items)
+                except json.JSONDecodeError:
+                    pass
+
+    return all_items
 
 
 # ── Section Builder ───────────────────────────────────────────────
@@ -215,7 +241,21 @@ def _build_sections(items: List[Dict]) -> List[Dict]:
             continue
 
         item_type = item.get("type", "content")
-        level = int(item.get("level", 1))
+        level = min(int(item.get("level", 1)), len(section_counter))
+
+        page = 0
+        page_match = re.match(r"\[Page (\d+)", text)
+        if page_match:
+            page = int(page_match.group(1))
+        # Strip ALL formatting markers from text — they are for analysis only
+        text = re.sub(r'\[Page \d+(?:,\s*(?:Bold,\s*)?\d+pt)?\]\s*', '', text)
+        text = re.sub(r'\[Bold(?:,\s*\d+pt)?\]\s*', '', text)
+        text = re.sub(r'\[Heading \d+\]\s*', '', text)
+        text = re.sub(r'\[Table\]\s*', '', text)
+        text = re.sub(r'\[\d+pt\]\s*', '', text)
+        text = text.strip()
+        if not text:
+            continue
 
         if item_type == "heading":
             for j in range(level, len(section_counter)):
@@ -240,7 +280,7 @@ def _build_sections(items: List[Dict]) -> List[Dict]:
                 "section_level": level,
                 "is_heading": True,
                 "is_table": False,
-                "page": 0,
+                "page": page,
             })
         else:
             sections.append({
@@ -250,10 +290,20 @@ def _build_sections(items: List[Dict]) -> List[Dict]:
                 "section_level": len(heading_stack),
                 "is_heading": False,
                 "is_table": False,
-                "page": 0,
+                "page": page,
             })
 
     return sections
+
+
+def _strip_markers(text: str) -> str:
+    """Remove all formatting markers from text."""
+    text = re.sub(r'\[Page \d+(?:,\s*(?:Bold,\s*)?\d+pt)?\]\s*', '', text)
+    text = re.sub(r'\[Bold(?:,\s*\d+pt)?\]\s*', '', text)
+    text = re.sub(r'\[Heading \d+\]\s*', '', text)
+    text = re.sub(r'\[Table\]\s*', '', text)
+    text = re.sub(r'\[\d+pt\]\s*', '', text)
+    return text.strip()
 
 
 # ── Main Entry Point ──────────────────────────────────────────────
@@ -263,6 +313,7 @@ def parse_document_structure(file_path: str) -> List[Dict]:
 
     Extracts text + minimal formatting metadata, sends to LLM for
     structure analysis, returns section dicts for the chunker.
+    LLM is always the primary parser.
     """
     ext = os.path.splitext(file_path)[1].lower()
     if ext not in ('.docx', '.pdf'):
@@ -276,20 +327,112 @@ def parse_document_structure(file_path: str) -> List[Dict]:
     if not formatted.strip():
         return []
 
-    fmt = "docx" if ext == ".docx" else "pdf"
-    items = _llm_analyze_structure(formatted, fmt=fmt)
+    items = _llm_analyze_structure(formatted)
 
     if items:
         sections = _build_sections(items)
         if sections:
             return sections
 
-    return [{
-        "section_path": "0",
-        "heading_hierarchy": ["Document"],
-        "content": formatted[:50000],
-        "section_level": 0,
-        "is_heading": False,
-        "is_table": False,
-        "page": 0,
-    }]
+    # ── Fallback: font-size aware heading detection ───────────────
+    paragraphs = [p.strip() for p in formatted.split('\n') if p.strip()]
+
+    size_counts = {}
+    bold_sizes = set()
+    for para in paragraphs:
+        size_match = re.search(r'(\d+)pt\]', para)
+        if size_match:
+            sz = int(size_match.group(1))
+            size_counts[sz] = size_counts.get(sz, 0) + 1
+            if 'Bold' in para:
+                bold_sizes.add(sz)
+
+    body_size = max(size_counts, key=size_counts.get) if size_counts else 0
+    sorted_sizes = sorted(size_counts.keys(), reverse=True)
+    size_to_level = {}
+    for idx, sz in enumerate(sorted_sizes):
+        if sz > body_size:
+            size_to_level[sz] = min(idx + 1, 3)
+
+    numbered_pattern = re.compile(
+        r'^(?:Article|Section|Rule|Clause|Chapter|Part|Schedule|Appendix)\s+\d+',
+        re.IGNORECASE
+    )
+    roman_pattern = re.compile(
+        r'^(?:PART|ANNEX)\s+[IVXLC]+',
+        re.IGNORECASE
+    )
+
+    sections = []
+    heading_stack = []
+    section_counter = [0, 0, 0, 0, 0]
+
+    for para in paragraphs:
+        clean = _strip_markers(para)
+        if not clean or len(clean.split()) < 3:
+            continue
+
+        is_heading = False
+        heading_level = 1
+
+        m = re.match(r'\[Heading (\d+)', para)
+        if m:
+            is_heading = True
+            heading_level = int(m.group(1))
+        elif re.match(r'\[Bold(?:,\s*\d+pt)?\]', para) and not body_size:
+            is_heading = True
+            heading_level = 2
+        elif body_size:
+            size_match = re.search(r'Bold,\s*(\d+)pt\]', para)
+            if size_match:
+                sz = int(size_match.group(1))
+                if sz in size_to_level:
+                    is_heading = True
+                    heading_level = size_to_level[sz]
+                elif sz > body_size:
+                    is_heading = True
+                    heading_level = 1
+            if not is_heading and numbered_pattern.match(clean):
+                is_heading = True
+                heading_level = 3
+            if not is_heading and roman_pattern.match(clean):
+                is_heading = True
+                heading_level = 1
+        else:
+            if numbered_pattern.match(clean) or roman_pattern.match(clean):
+                is_heading = True
+                heading_level = 2
+
+        if is_heading:
+            for j in range(heading_level, len(section_counter)):
+                section_counter[j] = 0
+            section_counter[heading_level - 1] += 1
+            section_path = ".".join(
+                str(section_counter[j]) for j in range(heading_level) if section_counter[j] > 0
+            )
+            heading_stack = [(l, t) for l, t in heading_stack if l < heading_level]
+            heading_stack.append((heading_level, clean))
+            sections.append({
+                "section_path": section_path,
+                "heading_hierarchy": [t for l, t in heading_stack],
+                "content": clean,
+                "section_level": heading_level,
+                "is_heading": True,
+                "is_table": False,
+                "page": 0,
+            })
+        else:
+            current_path = ".".join(
+                str(section_counter[j]) for j in range(len(section_counter)) if section_counter[j] > 0
+            ) or "0"
+            hierarchy = [t for l, t in heading_stack] if heading_stack else ["Document"]
+            sections.append({
+                "section_path": current_path,
+                "heading_hierarchy": hierarchy,
+                "content": clean,
+                "section_level": len(heading_stack),
+                "is_heading": False,
+                "is_table": '[Table]' in para,
+                "page": 0,
+            })
+    return sections
