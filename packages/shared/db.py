@@ -35,7 +35,7 @@ def init_db():
     """Initialize database tables."""
     # Import models to ensure they're registered with Base
     from packages.shared.models import (
-        Document, Chunk, Entity, Query, Answer, Citation, Feedback, AuditLog, User
+        Document, Chunk, Entity, Query, Answer, Citation, Feedback, AuditLog, User, RefreshToken
     )
     Base.metadata.create_all(bind=engine)
     print(f"✅ Database tables created/verified")

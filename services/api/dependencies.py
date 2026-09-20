@@ -5,12 +5,12 @@ Centralizes authentication, audit logging, and the user store so the
 endpoint routers stay thin.
 """
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, Header, status
 from fastapi.security import OAuth2PasswordBearer
 
-from packages.shared.auth import verify_token
+from packages.shared.auth import verify_token, create_access_token, hash_token
 from packages.shared.db import get_db_session
-from packages.shared.models import AuditLog, User
+from packages.shared.models import AuditLog, User, RefreshToken
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
@@ -44,8 +44,31 @@ def log_audit_action(actor: str, action: str, payload: dict = None):
         print(f"⚠️ Audit logging failed: {e}")
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    request: Request = None,
+    x_refresh_token: str = Header(default=None),
+):
     user_data = verify_token(token)
+
+    if not user_data and x_refresh_token:
+        refresh_payload = verify_token(x_refresh_token)
+        if refresh_payload and refresh_payload.get("type") == "refresh":
+            username = refresh_payload.get("username")
+            if username:
+                try:
+                    with get_db_session() as session:
+                        h = hash_token(x_refresh_token)
+                        db_token = session.query(RefreshToken).filter(RefreshToken.token_hash == h).first()
+                        user = session.query(User).filter(User.username == username).first()
+                        if db_token and user and user.is_active:
+                            new_access = create_access_token({"username": username, "access_level": user.access_level})
+                            if request:
+                                request.state.new_access_token = new_access
+                            return {"username": username, "access_level": user.access_level}
+                except Exception:
+                    pass
+
     if not user_data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

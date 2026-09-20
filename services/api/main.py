@@ -5,7 +5,7 @@ The app is assembled here; endpoint logic lives in the routers package
 (services/api/routers/) and shared dependencies in services/api/dependencies.py.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 import json
 
@@ -22,6 +22,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def inject_refreshed_token(request: Request, call_next):
+    response: Response = await call_next(request)
+    new_token = getattr(request.state, "new_access_token", None)
+    if new_token:
+        response.headers["X-New-Access-Token"] = new_token
+    return response
 
 
 @app.on_event("startup")

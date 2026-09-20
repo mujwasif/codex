@@ -31,8 +31,7 @@ COPY --chown=appuser:appuser . .
 
 # Runtime dirs bind-mounted in compose; ensure writable for non-root
 RUN mkdir -p /app/logs /app/state /app/.state /app/archive /app/.cache/huggingface && \
-    chmod -R 777 /app/.cache && \
-    chown -R appuser:appuser /app/logs /app/state /app/.state /app/archive
+    chown -R appuser:appuser /app/logs /app/state /app/.state /app/archive /app/.cache
 
 USER appuser
 

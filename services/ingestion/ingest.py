@@ -14,17 +14,14 @@ from packages.shared.config import (
     ARCHIVE_DIR,
     EMBEDDING_DEVICE,
     MAX_CLAUSE_TOKENS,
-    OVERLAP_TOKENS,
-    USE_LLM_FOR_CHUNKING,
+    RETRIEVER_MODEL,
 )
 
-MAX_CLAUSE_TOKENS = 200
-OVERLAP_TOKENS = 20
-USE_LLM = USE_LLM_FOR_CHUNKING
+
 
 # Setup paths and model
 archive_path = ARCHIVE_DIR
-model = SentenceTransformer(MODEL_NAME, device=EMBEDDING_DEVICE)
+model = SentenceTransformer(RETRIEVER_MODEL, device=EMBEDDING_DEVICE)
 
 
 def _existing_doc(session, source_uri: str):
@@ -109,13 +106,13 @@ def ingest_file(file_path: str, session, force: bool = False):
         )
         session.add(document)
 
+        document.title_embedding = model.encode(filename).tolist()
+
         # Chunk with clause-level detection
         print(f"  Chunking {filename} with clause-level detection...")
         chunks = chunk_document_clauses(
             sections,
             max_clause_tokens=MAX_CLAUSE_TOKENS,
-            overlap_tokens=OVERLAP_TOKENS,
-            use_llm=USE_LLM,
         )
 
         # Print chunk statistics
@@ -139,9 +136,7 @@ def ingest_file(file_path: str, session, force: bool = False):
                 clause_ref=chunk_data["clause_ref"],
                 page=chunk_data.get("page"),
                 text=chunk_data["text"],
-                embedding=embedding.tolist()
-                if hasattr(embedding, "tolist")
-                else embedding,
+                embedding=embedding,
                 token_count=chunk_data["token_count"],
                 version="v1",
                 access_level=access_level,

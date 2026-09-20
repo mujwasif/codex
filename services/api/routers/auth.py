@@ -4,14 +4,16 @@ Authentication endpoints: register, login, and token refresh.
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 from fastapi.security import OAuth2PasswordRequestForm
+from datetime import datetime, timedelta
 
 from packages.shared.auth import (
     get_pwd_hash, verify_password, create_access_token,
-    create_refresh_token, verify_token,
+    create_refresh_token, verify_token, hash_token,
 )
 from packages.shared.schemas import Token, UserCreate, UserResponse
 from packages.shared.db import get_db_session
-from packages.shared.models import User
+from packages.shared.models import User, RefreshToken
+from packages.shared.config import REFRESH_TOKEN_EXPIRE_MINUTES
 from services.api.dependencies import get_current_active_user, log_audit_action
 
 router = APIRouter(tags=["auth"])
@@ -78,6 +80,13 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
                 data={"username": user.username, "access_level": user.access_level}
             )
 
+            session.add(RefreshToken(
+                token_hash=hash_token(refresh_token),
+                username=user.username,
+                expires_at=datetime.utcnow() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES),
+            ))
+            session.commit()
+
             log_audit_action(user.username, "login", {"success": True})
 
             return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
@@ -105,25 +114,39 @@ async def refresh_token(authorization: str = Header(...)):
     if not username:
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
-    # Verify user still exists and is active
-    user_dict = None
     try:
         with get_db_session() as session:
+            # Check refresh token exists in DB (not revoked)
+            old_hash = hash_token(token)
+            db_token = session.query(RefreshToken).filter(RefreshToken.token_hash == old_hash).first()
+            if not db_token:
+                raise HTTPException(status_code=401, detail="Refresh token revoked or not found")
+
+            # Verify user still exists and is active
             user = session.query(User).filter(User.username == username).first()
             if not user or not user.is_active:
                 raise HTTPException(status_code=401, detail="User not found or inactive")
-            user_dict = {
-                "username": user.username,
-                "access_level": user.access_level,
-            }
+
+            user_dict = {"username": user.username, "access_level": user.access_level}
+
+            # Revoke old refresh token
+            session.delete(db_token)
+
+            # Issue new pair
+            access_token = create_access_token(data=user_dict)
+            new_refresh_token = create_refresh_token(data=user_dict)
+
+            session.add(RefreshToken(
+                token_hash=hash_token(new_refresh_token),
+                username=username,
+                expires_at=datetime.utcnow() + timedelta(minutes=REFRESH_TOKEN_EXPIRE_MINUTES),
+            ))
+            session.commit()
+
+            log_audit_action(username, "token_refresh", {"success": True})
+
+            return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
     except HTTPException:
         raise
     except Exception:
         raise HTTPException(status_code=500, detail="Token refresh failed")
-
-    access_token = create_access_token(data=user_dict)
-    new_refresh_token = create_refresh_token(data=user_dict)
-
-    log_audit_action(username, "token_refresh", {"success": True})
-
-    return {"access_token": access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}

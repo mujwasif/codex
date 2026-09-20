@@ -114,6 +114,16 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT NOW()
 );
 
+-- refresh_tokens: Server-side refresh token tracking for revocation
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    token_hash VARCHAR(64) PRIMARY KEY,
+    username VARCHAR(100) NOT NULL,
+    created_at TIMESTAMP DEFAULT NOW(),
+    expires_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_username ON refresh_tokens(username);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires_at);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_chunks_document_id ON chunks(document_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_clause_ref ON chunks(clause_ref);

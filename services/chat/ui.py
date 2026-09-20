@@ -21,14 +21,52 @@ def token_payload(token):
         return {}
 
 
-
-def fetch_ingestion_status(token):
+def _try_refresh_token():
+    refresh = st.session_state.get("refresh_token")
+    if not refresh:
+        return False
     try:
-        response = requests.get(
-            f"{API_BASE_URL}/v1/ingestion/status",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
+        resp = requests.post(f"{API_BASE_URL}/refresh", headers={"Authorization": f"Bearer {refresh}"}, timeout=10)
+        if resp.ok:
+            data = resp.json()
+            st.session_state.token = data["access_token"]
+            st.session_state.refresh_token = data["refresh_token"]
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def api_request(method, path, **kwargs):
+    token = st.session_state.get("token")
+    headers = kwargs.pop("headers", {})
+    headers["Authorization"] = f"Bearer {token}"
+    headers["X-Refresh-Token"] = st.session_state.get("refresh_token", "")
+    timeout = kwargs.pop("timeout", 30)
+    resp = requests.request(method, f"{API_BASE_URL}{path}", headers=headers, timeout=timeout, **kwargs)
+
+    new_token = resp.headers.get("X-New-Access-Token")
+    if new_token:
+        st.session_state.token = new_token
+
+    if resp.status_code == 401:
+        if _try_refresh_token():
+            headers["Authorization"] = f"Bearer {st.session_state.token}"
+            headers["X-Refresh-Token"] = st.session_state.get("refresh_token", "")
+            resp = requests.request(method, f"{API_BASE_URL}{path}", headers=headers, timeout=timeout, **kwargs)
+            new_token = resp.headers.get("X-New-Access-Token")
+            if new_token:
+                st.session_state.token = new_token
+        else:
+            st.session_state.token = None
+            st.session_state.refresh_token = None
+            st.rerun()
+    return resp
+
+
+def fetch_ingestion_status():
+    try:
+        response = api_request("get", "/v1/ingestion/status", timeout=10)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -36,13 +74,12 @@ def fetch_ingestion_status(token):
         return None
 
 
-def upload_policy(token, file):
-    headers = {"Authorization": f"Bearer {token}"}
+def upload_policy(file):
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/v1/ingest",
+        response = api_request(
+            "post",
+            "/v1/ingest",
             files={"file": (file.name, file.getvalue(), file.type or "application/octet-stream")},
-            headers=headers,
             timeout=60,
         )
         if response.status_code == 403:
@@ -59,12 +96,11 @@ def upload_policy(token, file):
         return None
 
 
-def delete_policy(token, document_id):
-    headers = {"Authorization": f"Bearer {token}"}
+def delete_policy(document_id):
     try:
-        response = requests.delete(
-            f"{API_BASE_URL}/v1/documents/{document_id}",
-            headers=headers,
+        response = api_request(
+            "delete",
+            f"/v1/documents/{document_id}",
             timeout=60,
         )
         if response.status_code == 403:
@@ -80,12 +116,11 @@ def delete_policy(token, document_id):
         return None
 
 
-def retry_policy(token, document_id):
-    headers = {"Authorization": f"Bearer {token}"}
+def retry_policy(document_id):
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/v1/ingestion/retry/{document_id}",
-            headers=headers,
+        response = api_request(
+            "post",
+            f"/v1/ingestion/retry/{document_id}",
             timeout=30,
         )
         if response.status_code == 403:
@@ -104,12 +139,11 @@ def retry_policy(token, document_id):
         return None
 
 
-def retry_chunks_policy(token):
-    headers = {"Authorization": f"Bearer {token}"}
+def retry_chunks_policy():
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/v1/ingestion/retry-chunks",
-            headers=headers,
+        response = api_request(
+            "post",
+            "/v1/ingestion/retry-chunks",
             timeout=30,
         )
         if response.status_code == 403:
@@ -122,12 +156,11 @@ def retry_chunks_policy(token):
         return None
 
 
-def retry_graph_policy(token):
-    headers = {"Authorization": f"Bearer {token}"}
+def retry_graph_policy():
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/v1/ingestion/retry-graph",
-            headers=headers,
+        response = api_request(
+            "post",
+            "/v1/ingestion/retry-graph",
             timeout=30,
         )
         if response.status_code == 403:
@@ -140,12 +173,11 @@ def retry_graph_policy(token):
         return None
 
 
-def remove_policy(token, document_id):
-    headers = {"Authorization": f"Bearer {token}"}
+def remove_policy(document_id):
     try:
-        response = requests.delete(
-            f"{API_BASE_URL}/v1/documents/{document_id}",
-            headers=headers,
+        response = api_request(
+            "delete",
+            f"/v1/documents/{document_id}",
             timeout=60,
         )
         if response.status_code == 403:
@@ -161,13 +193,9 @@ def remove_policy(token, document_id):
         return None
 
 
-def fetch_users(token):
+def fetch_users():
     try:
-        response = requests.get(
-            f"{API_BASE_URL}/users",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
+        response = api_request("get", "/users", timeout=10)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -175,13 +203,12 @@ def fetch_users(token):
         return []
 
 
-def create_user(token, data):
-    headers = {"Authorization": f"Bearer {token}"}
+def create_user(data):
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/users",
+        response = api_request(
+            "post",
+            "/users",
             json=data,
-            headers=headers,
             timeout=10,
         )
         if response.status_code == 400:
@@ -195,13 +222,12 @@ def create_user(token, data):
         return None
 
 
-def update_user(token, user_id, data):
-    headers = {"Authorization": f"Bearer {token}"}
+def update_user(user_id, data):
     try:
-        response = requests.patch(
-            f"{API_BASE_URL}/users/{user_id}",
+        response = api_request(
+            "patch",
+            f"/users/{user_id}",
             json=data,
-            headers=headers,
             timeout=10,
         )
         if response.status_code == 404:
@@ -218,12 +244,11 @@ def update_user(token, user_id, data):
         return None
 
 
-def delete_user_api(token, user_id):
-    headers = {"Authorization": f"Bearer {token}"}
+def delete_user_api(user_id):
     try:
-        response = requests.delete(
-            f"{API_BASE_URL}/users/{user_id}",
-            headers=headers,
+        response = api_request(
+            "delete",
+            f"/users/{user_id}",
             timeout=10,
         )
         if response.status_code == 404:
@@ -236,13 +261,12 @@ def delete_user_api(token, user_id):
         return None
 
 
-def reset_user_password_api(token, user_id, new_password):
-    headers = {"Authorization": f"Bearer {token}"}
+def reset_user_password_api(user_id, new_password):
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/users/{user_id}/reset-password",
+        response = api_request(
+            "post",
+            f"/users/{user_id}/reset-password",
             json={"new_password": new_password},
-            headers=headers,
             timeout=10,
         )
         if response.status_code == 404:
@@ -255,13 +279,9 @@ def reset_user_password_api(token, user_id, new_password):
         return None
 
 
-def fetch_documents(token):
+def fetch_documents():
     try:
-        response = requests.get(
-            f"{API_BASE_URL}/documents",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
+        response = api_request("get", "/documents", timeout=10)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -269,13 +289,9 @@ def fetch_documents(token):
         return []
 
 
-def fetch_document_detail(token, doc_id):
+def fetch_document_detail(doc_id):
     try:
-        response = requests.get(
-            f"{API_BASE_URL}/documents/{doc_id}",
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=15,
-        )
+        response = api_request("get", f"/documents/{doc_id}", timeout=15)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -300,13 +316,13 @@ def render_live_ingestion_feed_from_data(status_data):
         st.info("No ingestion activity yet.")
 
 
-def render_live_ingestion_feed(token):
+def render_live_ingestion_feed():
     """Terminal-style live feed of the ingestion worker output. Auto-refreshes every 5s."""
-    data = fetch_ingestion_status(token)
+    data = fetch_ingestion_status()
     render_live_ingestion_feed_from_data(data)
 
 
-def render_ingestion_status_panel(status_data, token):
+def render_ingestion_status_panel(status_data):
     if not status_data:
         return
     counts = status_data.get("counts") or {}
@@ -366,7 +382,7 @@ def render_ingestion_status_panel(status_data, token):
             if chunk_failures:
                 if st.button(f"Retry Chunking ({len(chunk_failures)})", type="primary", use_container_width=True):
                     with st.spinner("Retrying chunking for failed documents..."):
-                        result = retry_chunks_policy(token)
+                        result = retry_chunks_policy()
                     if result and result.get("retried", 0) > 0:
                         st.success(f"Retrying {result['retried']} document(s) for chunking.")
                         st.rerun()
@@ -378,7 +394,7 @@ def render_ingestion_status_panel(status_data, token):
             if graph_failures:
                 if st.button(f"Retry Graph ({len(graph_failures)})", type="primary", use_container_width=True):
                     with st.spinner("Retrying graph generation for failed documents..."):
-                        result = retry_graph_policy(token)
+                        result = retry_graph_policy()
                     if result and result.get("retried", 0) > 0:
                         st.success(f"Retrying {result['retried']} document(s) for graph.")
                         st.rerun()
@@ -400,7 +416,7 @@ def render_ingestion_status_panel(status_data, token):
             )
             if st.button("Remove", key=f"remove_{doc_id}", use_container_width=False, type="secondary"):
                 with st.spinner(f"Removing {title} and all its data..."):
-                    result = remove_policy(token, doc_id)
+                    result = remove_policy(doc_id)
                 if result:
                     st.success(f"Removed '{result.get('title')}': {result.get('chunks_removed', 0)} chunks, graph cleaned.")
                     st.rerun()
@@ -427,7 +443,7 @@ def render_ingestion_status_panel(status_data, token):
                 st.warning("Please tick the confirmation checkbox first.")
             else:
                 with st.spinner(f"{action_label} and cleaning up all related content..."):
-                    result = delete_policy(token, options[selected])
+                    result = delete_policy(options[selected])
                 if result:
                     st.success(
                         f"{action_label.split()[0]}d '{result.get('title')}': "
@@ -438,7 +454,7 @@ def render_ingestion_status_panel(status_data, token):
 
 
 
-def render_ingestion_tab(token):
+def render_ingestion_tab():
     st.subheader("Ingestion & Policies")
     st.caption(
         "Admin workspace. Upload one PDF or DOCX at a time. Each document becomes "
@@ -472,7 +488,7 @@ def render_ingestion_tab(token):
                 continue
             
             status_text.text(f"Queuing {idx+1}/{len(files_to_upload)}: {file.name}...")
-            result = upload_policy(token, file)
+            result = upload_policy(file)
             if result:
                 success_count += 1
             
@@ -488,17 +504,17 @@ def render_ingestion_tab(token):
             st.error("No documents were successfully queued.")
 
     st.divider()
-    render_ingestion_auto_refresh(token)
+    render_ingestion_auto_refresh()
 
 
 @st.fragment(run_every=5)
-def render_ingestion_auto_refresh(token):
-    status_data = fetch_ingestion_status(token)
+def render_ingestion_auto_refresh():
+    status_data = fetch_ingestion_status()
     if status_data:
-        render_ingestion_status_panel(status_data, token)
+        render_ingestion_status_panel(status_data)
 
 
-def render_users_tab(token):
+def render_users_tab():
     st.subheader("User Management")
     st.caption("Admin workspace. Create, edit, and delete users. New users default to Employee access level.")
 
@@ -523,7 +539,7 @@ def render_users_tab(token):
         if not new_username or not new_password or not new_department:
             st.error("All fields are required.")
         else:
-            result = create_user(token, {
+            result = create_user({
                 "username": new_username,
                 "password": new_password,
                 "department": new_department,
@@ -538,7 +554,7 @@ def render_users_tab(token):
     # --- User list ---
     st.markdown("#### All Users")
     with st.spinner("Loading users..."):
-        users = fetch_users(token)
+        users = fetch_users()
 
     if not users:
         st.info("No users found.")
@@ -601,7 +617,7 @@ def render_users_tab(token):
                         cancel_clicked = st.form_submit_button("Cancel")
 
                 if save_clicked:
-                    result = update_user(token, uid, {
+                    result = update_user(uid, {
                         "department": edit_dept,
                         "access_level": edit_level,
                     })
@@ -633,7 +649,7 @@ def render_users_tab(token):
                     elif new_pass != confirm_pass:
                         st.error("Passwords do not match.")
                     else:
-                        result = reset_user_password_api(token, uid, new_pass)
+                        result = reset_user_password_api(uid, new_pass)
                         if result:
                             st.success(f"Password reset for '{result['username']}'.")
                             st.session_state[f"resetting_{uid}"] = False
@@ -648,7 +664,7 @@ def render_users_tab(token):
             dc1, dc2 = st.columns(2)
             with dc1:
                 if st.button("Confirm Delete", key=f"confirm_del_{uid}", type="primary"):
-                    result = delete_user_api(token, uid)
+                    result = delete_user_api(uid)
                     if result:
                         st.success(f"User '{result['username']}' deleted.")
                         st.session_state[f"deleting_{uid}"] = False
@@ -659,12 +675,12 @@ def render_users_tab(token):
                     st.rerun()
 
 
-def render_documents_tab(token):
+def render_documents_tab():
     st.subheader("Documents & Chunks")
     st.caption("Browse ingested policy documents and their chunked content.")
 
     with st.spinner("Loading documents..."):
-        documents = fetch_documents(token)
+        documents = fetch_documents()
 
     if not documents:
         st.info("No documents found. Upload documents in the Ingestion tab.")
@@ -701,7 +717,7 @@ def render_documents_tab(token):
         # Show document detail if toggled
         if st.session_state.get(f"viewing_doc_{doc_id}", False):
             with st.spinner(f"Loading chunks for {doc['title']}..."):
-                detail = fetch_document_detail(token, doc_id)
+                detail = fetch_document_detail(doc_id)
 
             if detail:
                 chunks = detail.get("chunks", [])
@@ -1075,6 +1091,8 @@ st.markdown(
 
 if "token" not in st.session_state:
     st.session_state.token = None
+if "refresh_token" not in st.session_state:
+    st.session_state.refresh_token = None
 if "username" not in st.session_state:
     st.session_state.username = None
 if "messages" not in st.session_state:
@@ -1089,11 +1107,10 @@ if "pending_conflict_question" not in st.session_state:
     st.session_state.pending_conflict_question = None
 
 
-def fetch_chat_history(token):
+def fetch_chat_history():
     """Load the user's persisted Q&A history (newest first) for rehydration."""
-    headers = {"Authorization": f"Bearer {token}"}
     try:
-        response = requests.get(f"{API_BASE_URL}/query/history", headers=headers, timeout=30)
+        response = api_request("get", "/query/history", timeout=30)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -1101,11 +1118,10 @@ def fetch_chat_history(token):
         return None
 
 
-def clear_chat_history(token):
+def clear_chat_history():
     """Permanently delete the user's chat history from the server."""
-    headers = {"Authorization": f"Bearer {token}"}
     try:
-        response = requests.delete(f"{API_BASE_URL}/query/history", headers=headers, timeout=30)
+        response = api_request("delete", "/query/history", timeout=30)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
@@ -1155,7 +1171,7 @@ if not st.session_state.get("token"):
             st.session_state.token = url_token
             st.session_state.username = payload.get("username", "")
             try:
-                history = fetch_chat_history(url_token)
+                history = fetch_chat_history()
                 st.session_state.messages = messages_from_history(history) if history else []
             except Exception:
                 st.session_state.messages = []
@@ -1181,54 +1197,14 @@ def login_user(username, password):
         return None, None
 
 
-def _try_refresh_token() -> bool:
-    """Attempt to refresh the access token using the stored refresh token. Returns True on success."""
-    refresh = st.session_state.get("refresh_token")
-    if not refresh:
-        return False
-    try:
-        resp = requests.post(
-            f"{API_BASE_URL}/refresh",
-            headers={"Authorization": f"Bearer {refresh}"},
-            timeout=10,
-        )
-        if resp.ok:
-            data = resp.json()
-            st.session_state.token = data["access_token"]
-            st.session_state.refresh_token = data["refresh_token"]
-            return True
-    except Exception:
-        pass
-    return False
-
-
 def ask_codex(question: str, selected_doc_ids=None):
     if not st.session_state.get("token"):
         return None
-    headers = {"Authorization": f"Bearer {st.session_state.token}"}
     payload = {"question": question, "search_mode": "hybrid"}
     if selected_doc_ids:
         payload["selected_doc_ids"] = selected_doc_ids
     try:
-        response = requests.post(
-            f"{API_BASE_URL}/query",
-            json=payload,
-            headers=headers,
-            timeout=300,
-        )
-        if response.status_code == 401:
-            if _try_refresh_token():
-                headers["Authorization"] = f"Bearer {st.session_state.token}"
-                response = requests.post(
-                    f"{API_BASE_URL}/query",
-                    json=payload,
-                    headers=headers,
-                    timeout=300,
-                )
-            else:
-                st.session_state.token = None
-                st.session_state.refresh_token = None
-                st.rerun()
+        response = api_request("post", "/query", json=payload, timeout=300)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.ConnectionError:
@@ -1269,7 +1245,7 @@ if not st.session_state.token:
                         import time as _time
                         history = None
                         for _attempt in range(3):
-                            history = fetch_chat_history(access_token)
+                            history = fetch_chat_history()
                             if history is not None:
                                 break
                             _time.sleep(2)
@@ -1295,7 +1271,7 @@ with st.sidebar:
             st.warning("Tick the checkbox to confirm permanent deletion of your chat history.")
         else:
             with st.spinner("Deleting chat history..."):
-                result = clear_chat_history(st.session_state.token)
+                result = clear_chat_history()
             st.session_state.messages = []
             st.session_state.selected_doc_ids = None
             st.session_state.pending_conflict_question = None
@@ -1556,11 +1532,11 @@ if is_admin:
                     st.rerun()
 
     if st.session_state.active_view == "ingestion":
-        render_ingestion_tab(st.session_state.token)
+        render_ingestion_tab()
     elif st.session_state.active_view == "documents":
-        render_documents_tab(st.session_state.token)
+        render_documents_tab()
     elif st.session_state.active_view == "users":
-        render_users_tab(st.session_state.token)
+        render_users_tab()
     else:
         render_assistant_tab()
 else:

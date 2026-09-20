@@ -61,7 +61,7 @@ API_HOST = os.getenv("API_HOST", "0.0.0.0")
 API_PORT = int(os.getenv("API_PORT", "8000"))
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-to-a-random-secure-string")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
-TOKEN_EXPIRE_MINUTES = int(os.getenv("TOKEN_EXPIRE_MINUTES", "30"))
+TOKEN_EXPIRE_MINUTES = int(os.getenv("TOKEN_EXPIRE_MINUTES", "360"))
 REFRESH_TOKEN_EXPIRE_MINUTES = int(os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", "43200"))
 CORS_ORIGINS = os.getenv(
     "CORS_ORIGINS", '["http://localhost:8501","http://127.0.0.1:8501"]'
@@ -87,7 +87,7 @@ HISTORY_MAX_TOKENS = int(os.getenv("HISTORY_MAX_TOKENS", "2500"))
 
 # ── Ingestion ─────────────────────────────────────────────
 MAX_CLAUSE_TOKENS = int(os.getenv("MAX_CLAUSE_TOKENS", "70"))
-MIN_CLAUSE_TOKENS = int(os.getenv("MIN_CLAUSE_TOKENS", "30"))
+MIN_CLAUSE_TOKENS = int(os.getenv("MIN_CLAUSE_TOKENS", "20"))
 OVERLAP_TOKENS = int(os.getenv("OVERLAP_TOKENS", "20"))
 USE_LLM_FOR_CHUNKING = os.getenv("USE_LLM_FOR_CHUNKING", "true").lower() == "true"
 GRAPH_BATCH_SIZE = int(os.getenv("GRAPH_BATCH_SIZE", "30"))

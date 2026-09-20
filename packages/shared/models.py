@@ -172,3 +172,14 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class RefreshToken(Base):
+    """Server-side refresh token tracking for revocation."""
+    __tablename__ = 'refresh_tokens'
+    __table_args__ = {'extend_existing': True}
+
+    token_hash = Column(String(64), primary_key=True)
+    username = Column(String(100), nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
