@@ -83,6 +83,7 @@ class Query(Base):
     dept = Column(String(100))
     question = Column(Text, nullable=False)
     intent = Column(String(50))
+    tool_selection = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

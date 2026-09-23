@@ -72,7 +72,15 @@ def _classify_by_llm(question: str, chunks: List[Dict[str, Any]]) -> Dict[str, A
     2. Final Output:
        Provide a JSON response with the following keys:
        - "verdict": "clear", "conditional", or "violation"
-        - "elaboration": A detailed explanation of why this verdict was reached, with inline [Doc: X, Clause: Y] citations for every claim. If "clear", explain how it is compliant and which clauses satisfy the requirement.
+       - "elaboration": A detailed explanation with this structure:
+         1. Opening statement with verdict in bold (e.g., "Risk Level: **CONDITIONAL**")
+         2. Key findings with inline citations: [Doc: {{document_title}}, Clause: {{clause_ref}}]
+         3. Applicable regulations (if any)
+         4. Specific obligations and their levels (mandatory/optional)
+         5. Recommendations (if conditional or violation)
+       
+       Citation format: [Doc: {{document_title}}, Clause: {{clause_ref}}]
+       Example: "Data retention must be 7 years [Doc: Data Policy, Clause: 3.1], but the current practice is 90 days [Doc: Security Policy, Clause: 2.4]"
        
        Verdict Guide:
        - clear: No compliance issues; the policy is followed.
@@ -91,7 +99,7 @@ def _classify_by_llm(question: str, chunks: List[Dict[str, Any]]) -> Dict[str, A
         system_prompt="You are a strict compliance officer. Use Chain-of-Thought reasoning to analyze policy risk. Respond ONLY with a JSON object containing 'verdict' and 'elaboration'.",
         user_message=prompt,
         temperature=0.0,
-        max_tokens=1024,
+        max_tokens=4096,
         timeout=30.0,
         enable_thinking=True
     )

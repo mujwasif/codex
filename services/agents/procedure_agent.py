@@ -107,7 +107,7 @@ Question: {question}
             ),
             user_message=prompt,
             temperature=0.0,
-            max_tokens=6144,
+            max_tokens=4096,
             timeout=120.0,
         )
 

@@ -21,88 +21,8 @@ from packages.shared.schemas import (
 from packages.shared.db import get_db_session
 from packages.shared.models import Query, Answer, Citation, Chunk, Document, User
 from services.api.dependencies import get_current_active_user, log_audit_action
-from packages.shared.config import HISTORY_MAX_TOKENS, HISTORY_TURNS
 
 router = APIRouter(tags=["query"])
-
-
-def _load_user_history(session, user_id_or_name: str, limit: int = HISTORY_TURNS):
-    """
-    Load the last N turns for a user as (question, answer) pairs,
-    ordered oldest first (so they can be prepended in conversation order).
-    """
-    # Resolve username to UUID if necessary
-    user_uuid = user_id_or_name
-    if (
-        len(user_id_or_name) < 32
-    ):  # Simple heuristic: if it's not a UUID, it's a username
-        user = session.query(User).filter(User.username == user_id_or_name).first()
-        if user:
-            user_uuid = str(user.id)
-
-    q_rows = (
-        session.query(Query)
-        .filter(Query.user_id.in_([user_uuid, user_id_or_name]))
-        .options(joinedload(Query.answers))
-        .order_by(Query.created_at.desc())
-        .limit(limit)
-        .all()
-    )
-
-    turns = []
-    for q in reversed(q_rows):  # oldest first
-        if q.answers:
-            a = q.answers[0]  # one answer per query
-            turns.append(
-                {
-                    "question": q.question,
-                    "answer": a.answer,
-                    "intent": q.intent,
-                }
-            )
-    return turns
-
-
-def _estimate_tokens(text: str) -> int:
-    """Conservatively estimate tokens without loading a tokenizer."""
-    return max(1, (len(text) + 3) // 4)
-
-
-def _build_pipeline_question(
-    question: str,
-    history: list[dict],
-    max_history_tokens: int = HISTORY_MAX_TOKENS,
-) -> str:
-    """Prepend the newest history that fits the working-memory budget.
-
-    History is selected newest-first, then rendered in chronological order.
-    The current question is never truncated or displaced by old answers.
-    """
-    if not history:
-        return question
-
-    selected = []
-    used_tokens = 0
-    for turn in reversed(history):
-        rendered = f"User: {turn['question']}\nCodex: {turn['answer']}"
-        turn_tokens = _estimate_tokens(rendered)
-        if selected and used_tokens + turn_tokens > max_history_tokens:
-            break
-        if not selected and turn_tokens > max_history_tokens:
-            # Keep a bounded tail of an oversized answer rather than allowing
-            # one historical response to consume the entire context budget.
-            available_chars = max(4, max_history_tokens * 4)
-            question_text = str(turn.get("question", ""))
-            answer_text = str(turn.get("answer", ""))
-            prefix = f"User: {question_text}\nCodex: "
-            answer_budget = max(0, available_chars - len(prefix))
-            rendered = prefix + answer_text[:answer_budget]
-            turn_tokens = _estimate_tokens(rendered)
-        selected.append(rendered)
-        used_tokens += turn_tokens
-
-    history_text = "\n".join(reversed(selected))
-    return f"Conversation History:\n{history_text}\n\nQuestion: {question}"
 
 
 @router.post("/query", response_model=AnswerResponse)
@@ -126,13 +46,7 @@ async def secure_query(
     except Exception:
         pass
 
-    # 1. Load user's conversation history from DB
-    with get_db_session() as session:
-        history = _load_user_history(session, username)
-
-    pipeline_question = _build_pipeline_question(query_data.question, history)
-
-    # 2. Log the query (store raw question, not the contextualized one)
+    # 1. Log the query
     query_id = str(uuid.uuid4())
     try:
         with get_db_session() as session:
@@ -149,33 +63,20 @@ async def secure_query(
     except Exception as e:
         print(f"⚠️ Query logging failed: {e}")
 
-    # 3. Run through state machine orchestrator
+    # 2. Run through state machine orchestrator
     from services.agents.orchestrator import run_pipeline, QueryState, QueryIntent
 
-    # Carry the previous turn's classified intent so bare follow-ups
-    # ("for supplier termination?") inherit approval/conflict/... context.
-    prior_intent = None
-    if history:
-        last_intent = history[-1].get("intent")
-        if last_intent in {i.value for i in QueryIntent}:
-            prior_intent = QueryIntent(last_intent)
-
     search_mode = query_data.search_mode or "hybrid"
-
-    # If user selected documents (Phase 2), force conflict intent
     selected_doc_ids = query_data.selected_doc_ids
-    if selected_doc_ids:
-        prior_intent = QueryIntent.CONFLICT
 
     ctx = run_pipeline(
-        question=pipeline_question,
+        question=query_data.question,
         raw_question=query_data.question,
         user_id=username,
         access_level=level,
         department=department,
         search_mode=search_mode,
-        prior_intent=prior_intent,
-        selected_doc_ids=selected_doc_ids,
+        selected_doc_ids=query_data.selected_doc_ids,
     )
 
     # 4. Extract results from context
@@ -192,11 +93,10 @@ async def secure_query(
     answer_id = str(uuid.uuid4())
     try:
         with get_db_session() as session:
-            # Persist the classified intent so the next turn can inherit it
-            # as `prior_intent` for bare follow-up queries.
             q = session.query(Query).get(query_id)
             if q is not None:
                 q.intent = ctx.intent.value
+                q.tool_selection = ctx.tool_selection
 
             answer_record = Answer(
                 id=answer_id,
@@ -312,6 +212,7 @@ async def secure_query(
         next_steps=ctx.build_next_steps(),
         missing=ctx.build_missing(),
         created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+        tool_selection=ctx.tool_selection,
     )
 
 

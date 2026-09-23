@@ -1162,6 +1162,16 @@ def messages_from_history(history):
     return messages
 
 
+# Auto-load chat history on page refresh if logged in but messages empty
+if st.session_state.token and not st.session_state.messages:
+    try:
+        history = fetch_chat_history()
+        if history:
+            st.session_state.messages = messages_from_history(history)
+    except Exception:
+        pass
+
+
 if not st.session_state.get("token"):
     url_token = st.query_params.get("token")
     if url_token:

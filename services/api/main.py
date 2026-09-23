@@ -46,7 +46,8 @@ async def startup_event():
         from services.api.search import retriever, reranker
         dim = retriever.get_sentence_embedding_dimension()
         print(f"✓ Embedding model loaded: {dim}d")
-        print(f"✓ Reranker model loaded")
+        p
+        rint(f"✓ Reranker model loaded")
     except Exception as e:
         print(f"⚠️ Model preload failed: {e}")
 

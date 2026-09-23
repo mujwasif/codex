@@ -82,8 +82,6 @@ TOP_K_RETRIEVAL = int(os.getenv("TOP_K_RETRIEVAL", "20"))
 TOP_K_FINAL = int(os.getenv("TOP_K_FINAL", "5"))
 RRF_K = int(os.getenv("RRF_K", "60"))
 DEFAULT_SEARCH_MODE = os.getenv("DEFAULT_SEARCH_MODE", "hybrid")
-HISTORY_TURNS = int(os.getenv("HISTORY_TURNS", "5"))
-HISTORY_MAX_TOKENS = int(os.getenv("HISTORY_MAX_TOKENS", "2500"))
 
 # ── Ingestion ─────────────────────────────────────────────
 MAX_CLAUSE_TOKENS = int(os.getenv("MAX_CLAUSE_TOKENS", "70"))

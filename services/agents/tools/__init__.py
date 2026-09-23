@@ -36,6 +36,7 @@ from services.agents.tools.llm_tools import (
     AGENT_MODEL,
     INGESTION_MODEL,
 )
+from services.agents.tools.catalog import ToolSelection, select_tools, TOOL_NAMES
 
 __all__ = [
     "ToolResult",
@@ -50,4 +51,7 @@ __all__ = [
     "llm_generate_json",
     "AGENT_MODEL",
     "INGESTION_MODEL",
+    "ToolSelection",
+    "select_tools",
+    "TOOL_NAMES",
 ]

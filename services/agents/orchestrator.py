@@ -19,6 +19,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from services.agents.tools.llm_tools import llm_generate, AGENT_MODEL
+from services.agents.tools.catalog import ToolSelection, select_tools
+from services.agents.synthesizer import synthesize_answer
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +85,8 @@ class QueryContext:
 
     # Agent chain trace (recorded by run_pipeline)
     chain: List[Dict[str, Any]] = field(default_factory=list)
-
-    # Multi-intent results (filled by run_pipeline when multiple intents)
     intent_results: Dict[str, Any] = field(default_factory=dict)
-
+    tool_selection: Optional[Dict[str, Any]] = None
 
     error: Optional[str] = None
     start_time: float = 0.0
@@ -395,24 +395,8 @@ def _keyword_classify(question: str) -> tuple[QueryIntent, float]:
     return QueryIntent.GENERAL, 0.5
 
 
-_FOLLOWUP_START = (
-    "for ", "and ", "and for ", "what about ", "how about ", "regarding ",
-    "what about the ", "and the ", "and what about ", "about the ", "for the ",
-    "also ", "same for ", "likewise ", "similar for ", "what if ",
-)
-
-
-def _is_bare_followup(question: str) -> bool:
-    """True when a question is a qualifier/relative phrase lacking a kernel verb."""
-    q = question.strip().lower().rstrip("?.!")
-    if not q:
-        return False
-    return any(q.startswith(prefix) for prefix in _FOLLOWUP_START)
-
-
 def classify_intent(
     question: str,
-    prior_intent: Optional[QueryIntent] = None,
 ) -> tuple[List[QueryIntent], float, Optional[str], List[str]]:
     """
     CoT classification: list of intents + conflict_type + document phrases.
@@ -423,9 +407,6 @@ def classify_intent(
       0 docs → type_1, 1 doc → type_2b, 2+ docs → type_2
     """
     import json as _json
-
-    if _is_bare_followup(question) and prior_intent is not None:
-        return [prior_intent], 0.65, None, []
 
     VALID_INTENTS = {"approval", "conflict", "compliance", "procedure", "general", "conversational", "summary"}
 
@@ -642,14 +623,8 @@ def agent_retrieve(ctx: QueryContext):
     if ctx.chunks and ctx.state == QueryState.RETRIEVED:
         return
 
-    # Use the user's raw question for retrieval so history augmentation can't
-    # drown out the query's signal (e.g. a password question after unrelated
-    # supplier/clear-desk turns retrieves password chunks, not supplier ones).
-    # Bare follow-ups ("for supplier termination?") keep the history-augmented
-    # question so retrieval still inherits the prior turn's context.
+    # Use the user's raw question for retrieval to avoid context pollution.
     query = ctx.raw_question or ctx.question
-    if _is_bare_followup(query):
-        query = ctx.question
 
     # Increase retrieval depth for procedures to capture all requirements
     top_k = 100 if ctx.intent == QueryIntent.PROCEDURE else (50 if ctx.intent == QueryIntent.CONFLICT else 20)
@@ -1101,21 +1076,18 @@ def agent_risk_compliance(ctx: QueryContext):
 
 def agent_conversational(ctx: QueryContext):
     """Handle greetings, thanks, and casual conversation via LLM."""
-    from services.agents.tools.llm_tools import llm_generate, AGENT_MODEL
-
     result = llm_generate(
         model=AGENT_MODEL,
         system_prompt=(
             "You are Codex, a friendly policy intelligence assistant. "
-            "The user's message includes a Conversation History section showing recent turns. "
-            "Use that context to respond naturally — reference prior answers if they mention them.\n"
+            "Respond naturally and helpfully.\n"
             "Rules: Be warm but concise (1-3 sentences). Greet back, acknowledge thanks, "
             "redirect off-topic questions to policy topics. Never fabricate policy information. "
             "Do not use emojis."
         ),
         user_message=ctx.question,
         temperature=0.7,
-        max_tokens=600,
+        max_tokens=4096,
         timeout=10.0,
         enable_thinking=True,
     )
@@ -1329,6 +1301,157 @@ def _register_intent_tools():
 _register_intent_tools()
 
 
+# ═══════════════════════════════════════
+#  Tool-Based Pipeline Helpers
+# ═══════════════════════════════════════
+
+def _run_tool(selection: ToolSelection, ctx: QueryContext) -> ToolResult:
+    """Execute a single tool with its focused phrase. Isolates ctx mutations."""
+    import time as _time
+    from services.agents.tools.base import ToolResult as TR
+
+    tool_start = _time.time()
+
+    tool_ctx = QueryContext(
+        question=selection.phrase,
+        user_id=ctx.user_id,
+        access_level=ctx.access_level,
+        department=ctx.department,
+        raw_question=ctx.raw_question,
+        search_mode=ctx.search_mode,
+    )
+    tool_ctx.chunks = list(ctx.chunks)
+    tool_ctx.resolved_doc_ids = list(ctx.resolved_doc_ids)
+    tool_ctx.resolved_documents = list(ctx.resolved_documents)
+    tool_ctx.doc_phrases = list(ctx.doc_phrases)
+    tool_ctx.state = QueryState.RETRIEVED
+
+    tool_name = selection.tool_name
+
+    def _make_result(success, data=None, error=None):
+        elapsed = int((_time.time() - tool_start) * 1000)
+        return TR(success=success, data=data, error=error,
+                  latency_ms=elapsed, tool_name=tool_name)
+
+    try:
+        if tool_name == "approval":
+            tool_ctx.intent = QueryIntent.APPROVAL
+            agent_approval(tool_ctx)
+            agent_reason(tool_ctx)
+            agent_verify(tool_ctx)
+            return _make_result(
+                success=tool_ctx.state != QueryState.ABSTAINED,
+                data={"answer": tool_ctx.answer, "verdict": tool_ctx.verdict,
+                      "confidence": tool_ctx.confidence, "citations": tool_ctx.citations,
+                      "approval": tool_ctx.approval_result},
+            )
+
+        elif tool_name == "conflict":
+            tool_ctx.intent = QueryIntent.CONFLICT
+            tool_ctx.conflict_type = selection.conflict_type
+            agent_conflict_check(tool_ctx)
+            agent_reason(tool_ctx)
+            agent_verify(tool_ctx)
+            return _make_result(
+                success=tool_ctx.state != QueryState.ABSTAINED,
+                data={"answer": tool_ctx.answer, "verdict": tool_ctx.verdict,
+                      "confidence": tool_ctx.confidence, "citations": tool_ctx.citations,
+                      "conflicts": tool_ctx.conflicts,
+                      "conflict_analysis": tool_ctx.conflict_analysis},
+            )
+
+        elif tool_name == "compliance":
+            tool_ctx.intent = QueryIntent.COMPLIANCE
+            agent_risk_compliance(tool_ctx)
+            agent_reason(tool_ctx)
+            agent_verify(tool_ctx)
+            return _make_result(
+                success=tool_ctx.state != QueryState.ABSTAINED,
+                data={"answer": tool_ctx.answer, "verdict": tool_ctx.verdict,
+                      "confidence": tool_ctx.confidence, "citations": tool_ctx.citations,
+                      "risk": tool_ctx.risk_result},
+            )
+
+        elif tool_name == "procedure":
+            tool_ctx.intent = QueryIntent.PROCEDURE
+            agent_procedure_reason(tool_ctx)
+            if not tool_ctx.answer:
+                agent_reason(tool_ctx)
+            agent_verify(tool_ctx)
+            return _make_result(
+                success=tool_ctx.state != QueryState.ABSTAINED,
+                data={"answer": tool_ctx.answer, "verdict": tool_ctx.verdict,
+                      "confidence": tool_ctx.confidence, "citations": tool_ctx.citations},
+            )
+
+        elif tool_name == "summary":
+            if not tool_ctx.resolved_doc_ids:
+                return _make_result(
+                    success=False,
+                    data={"answer": "Please specify which document you'd like summarized.",
+                          "verdict": "abstained", "confidence": 0.0, "citations": []},
+                )
+            from services.api.search import fetch_chunks_by_document
+            # Find correct doc_id by matching selection.doc_names against resolved_documents
+            doc_id = None
+            if selection.doc_names and tool_ctx.resolved_documents:
+                for rd in tool_ctx.resolved_documents:
+                    if any(dn.lower() in rd.get("title", "").lower()
+                           for dn in selection.doc_names):
+                        doc_id = rd["id"]
+                        break
+            if not doc_id and tool_ctx.resolved_doc_ids:
+                doc_id = tool_ctx.resolved_doc_ids[0]
+            all_chunks = fetch_chunks_by_document([doc_id], tool_ctx.access_level)
+            tool_ctx.chunks = all_chunks.get(doc_id, [])
+            if not tool_ctx.chunks:
+                return _make_result(
+                    success=False,
+                    data={"answer": "Could not retrieve document content.",
+                          "verdict": "abstained", "confidence": 0.0, "citations": []},
+                )
+            agent_reason(tool_ctx)
+            agent_verify(tool_ctx)
+            return _make_result(
+                success=tool_ctx.state != QueryState.ABSTAINED,
+                data={"answer": tool_ctx.answer, "verdict": tool_ctx.verdict,
+                      "confidence": tool_ctx.confidence, "citations": tool_ctx.citations},
+            )
+
+        elif tool_name == "conversational":
+            agent_conversational(tool_ctx)
+            return _make_result(
+                success=True,
+                data={"answer": tool_ctx.answer, "verdict": tool_ctx.verdict,
+                      "confidence": tool_ctx.confidence, "citations": []},
+            )
+
+        else:
+            agent_reason(tool_ctx)
+            agent_verify(tool_ctx)
+            return _make_result(
+                success=tool_ctx.state != QueryState.ABSTAINED,
+                data={"answer": tool_ctx.answer, "verdict": tool_ctx.verdict,
+                      "confidence": tool_ctx.confidence, "citations": tool_ctx.citations},
+            )
+
+    except Exception as e:
+        logger.error(f"Tool '{tool_name}' failed: {e}")
+        return _make_result(success=False, error=str(e))
+
+
+def _copy_tool_fields(ctx: QueryContext, data: dict):
+    """Copy tool-specific fields from result data to context."""
+    if "approval" in data:
+        ctx.approval_result = data["approval"]
+    if "conflicts" in data:
+        ctx.conflicts = data["conflicts"]
+    if "conflict_analysis" in data:
+        ctx.conflict_analysis = data["conflict_analysis"]
+    if "risk" in data:
+        ctx.risk_result = data["risk"]
+
+
 def _merge_results(question: str, intent_results: dict) -> str:
     """Merge multiple intent results into one coherent answer."""
     parts = []
@@ -1368,15 +1491,18 @@ def run_pipeline(
     department: str = "",
     search_mode: str = "hybrid",
     raw_question: str = "",
-    prior_intent: Optional[QueryIntent] = None,
     selected_doc_ids: Optional[List[str]] = None,
 ) -> QueryContext:
     """
-    Multi-intent query pipeline using registered tools.
+    Tool-based query pipeline.
 
-    Phase 1: Classify intents → shared steps → run intent tools → merge
-    Phase 2 (selected_doc_ids): Conflict analysis on user-selected documents
+    1. select_tools() → LLM picks tools with focused phrases
+    2. resolve_docs + retrieve (shared)
+    3. Run tools in parallel (batches of 2)
+    4. synthesize() → merge results
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     ctx = QueryContext(
         question=question,
         user_id=user_id,
@@ -1387,114 +1513,229 @@ def run_pipeline(
     )
     ctx.start_timer()
 
-    # Phase 2: User selected documents — run conflict analysis
-    if selected_doc_ids and prior_intent == QueryIntent.CONFLICT:
-        ctx.intent = QueryIntent.CONFLICT
-        ctx.intent_confidence = 1.0
+    # ── Phase 2: User selected documents — re-run all tools ──────────
+    if selected_doc_ids:
         ctx.resolved_doc_ids = selected_doc_ids
-        ctx.state = QueryState.CLASSIFIED
+        ctx.state = QueryState.RETRIEVED
 
-        if len(selected_doc_ids) == 1:
-            ctx.conflict_type = "type_2b"
-        elif len(selected_doc_ids) >= 2:
-            ctx.conflict_type = "type_2"
+        # Re-run tool selection with the original question
+        selected_tools, selection_confidence = select_tools(
+            ctx.raw_question, ctx.access_level, ctx.department
+        )
+        selected_tools = [t for t in selected_tools if t.tool_name != "conversational"]
+        if not selected_tools:
+            selected_tools = [ToolSelection(
+                tool_name="general", phrase=ctx.raw_question, call_id="general_0"
+            )]
 
-        result = get_registry().call("intent_conflict", ctx=ctx)
-        if result.success and result.data.get("answer"):
-            ctx.answer = result.data["answer"]
-            ctx.verdict = result.data.get("verdict", "abstained")
-            ctx.confidence = result.data.get("confidence", 0.0)
-            ctx.citations = result.data.get("citations", [])
-            ctx.conflicts = result.data.get("conflicts", [])
-            ctx.conflict_analysis = result.data.get("conflict_analysis", {})
+        # Set primary intent from first tool
+        try:
+            ctx.intent = QueryIntent(selected_tools[0].tool_name)
+        except ValueError:
+            ctx.intent = QueryIntent.GENERAL
+
+        # Retrieve chunks for the selected documents
+        agent_retrieve(ctx)
+
+        # Run all tools in batches of 2
+        tool_results = {}
+        batches = [selected_tools[i:i+2] for i in range(0, len(selected_tools), 2)]
+        for batch in batches:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = {
+                    executor.submit(_run_tool, selection, ctx): selection.call_id
+                    for selection in batch
+                }
+                for future in as_completed(futures):
+                    call_id = futures[future]
+                    selection = next(s for s in selected_tools if s.call_id == call_id)
+                    try:
+                        tool_results[call_id] = future.result()
+                    except Exception as e:
+                        logger.error(f"Tool '{call_id}' raised exception: {e}")
+                        tool_results[call_id] = ToolResult(
+                            success=False, error=str(e), tool_name=selection.tool_name
+                        )
+
+        # Synthesize or use single tool result
+        if len(tool_results) == 1:
+            _, result = list(tool_results.items())[0]
+            if result.success and result.data.get("answer"):
+                ctx.answer = result.data["answer"]
+                ctx.verdict = result.data.get("verdict", "abstained")
+                ctx.confidence = result.data.get("confidence", 0.0)
+                ctx.citations = result.data.get("citations", [])
+        else:
+            answer, verdict, confidence, citations = synthesize_answer(
+                ctx.question, tool_results, ctx.access_level
+            )
+            ctx.answer = answer
+            ctx.verdict = verdict
+            ctx.confidence = confidence
+            ctx.citations = citations
 
         if ctx.state != QueryState.ABSTAINED:
             ctx.state = QueryState.DONE
         ctx.stop_timer()
         return ctx
 
-    # Phase 1: Classify intents
-    intents, confidence, conflict_type, doc_phrases = classify_intent(
-        ctx.raw_question or ctx.question,
-        prior_intent=prior_intent,
+    # ── Step 1: Tool Selection ──────────────────────────────────────
+    # Every query gets its own LLM tool selection call
+    selected_tools, selection_confidence = select_tools(
+        ctx.question, ctx.access_level, ctx.department
     )
-    ctx.intent = intents[0] if intents else QueryIntent.GENERAL
-    ctx.intent_confidence = confidence
-    ctx.conflict_type = conflict_type
-    ctx.doc_phrases = doc_phrases
-    ctx.state = QueryState.CLASSIFIED
+    logger.info(f"Selected tools: {[t.tool_name for t in selected_tools]} (confidence={selection_confidence:.2f})")
 
-    # Shared step: resolve document names (all intents except conversational)
-    if QueryIntent.CONVERSATIONAL not in intents:
-        agent_resolve_docs(ctx)
+    # Store tool selection data on context
+    ctx.tool_selection = {
+        "tools": [t.tool_name for t in selected_tools],
+        "phrases": {t.call_id: t.phrase for t in selected_tools},
+        "doc_names": {t.call_id: t.doc_names for t in selected_tools},
+        "conflict_types": {t.call_id: t.conflict_type for t in selected_tools},
+        "confidence": selection_confidence,
+    }
 
-    # CONVERSATIONAL is standalone
-    if intents == [QueryIntent.CONVERSATIONAL]:
-        result = get_registry().call("intent_conversational", ctx=ctx)
-        if result.success and result.data.get("answer"):
-            ctx.answer = result.data["answer"]
-            ctx.verdict = result.data.get("verdict", "clear")
-            ctx.confidence = result.data.get("confidence", 1.0)
+    # Set primary intent from first tool
+    if selected_tools:
+        primary = selected_tools[0].tool_name
+        try:
+            ctx.intent = QueryIntent(primary)
+        except ValueError:
+            ctx.intent = QueryIntent.GENERAL
+
+    # ── Step 2: Conversational shortcut ─────────────────────────────
+    if len(selected_tools) == 1 and selected_tools[0].tool_name == "conversational":
+        agent_conversational(ctx)
         ctx.state = QueryState.DONE
         ctx.stop_timer()
         return ctx
 
-    # CONFLICT with document selection → pause for user input
-    if (QueryIntent.CONFLICT in intents
-            and ctx.conflict_type in ("type_2", "type_2b")
-            and not selected_doc_ids
-            and ctx.doc_slots):
-        ctx.verdict = "pending_selection"
-        ctx.answer = (
-            "I found matching documents for your query. "
-            "Please select which documents you want to analyze from the options below."
-        )
-        ctx.state = QueryState.AWAITING_SELECTION
-        ctx.stop_timer()
-        return ctx
+    # ── Step 3: Shared steps — resolve docs + retrieve ──────────────
+    tool_names = [t.tool_name for t in selected_tools]
 
-    # Shared step: retrieve chunks (all intents except CONFLICT)
-    if QueryIntent.CONFLICT not in intents:
+    # Build doc_phrases: one phrase per document name (not the full tool phrase)
+    ctx.doc_phrases = []
+    for t in selected_tools:
+        if t.tool_name in ("summary", "conflict"):
+            if t.doc_names:
+                for name in t.doc_names:
+                    if name not in ctx.doc_phrases:
+                        ctx.doc_phrases.append(name)
+            else:
+                ctx.doc_phrases.append(t.phrase)
+
+    if ctx.doc_phrases and ("conflict" in tool_names or "summary" in tool_names):
+        ctx.intent = QueryIntent.CONFLICT
+
+    if ctx.doc_phrases:
+        agent_resolve_docs(ctx)
+
+    # Restore primary intent after doc resolution
+    if selected_tools:
+        try:
+            ctx.intent = QueryIntent(selected_tools[0].tool_name)
+        except ValueError:
+            ctx.intent = QueryIntent.GENERAL
+
+    # ── Pause for document selection if candidates found ─────────
+    if ctx.doc_slots and not selected_doc_ids:
+        needs_selection = any(
+            t.tool_name in ("summary", "conflict") for t in selected_tools
+        )
+        if needs_selection:
+            ctx.verdict = "pending_selection"
+            ctx.answer = (
+                "I found matching documents for your query. "
+                "Please select which documents you want to analyze from the options below."
+            )
+            ctx.state = QueryState.AWAITING_SELECTION
+            ctx.stop_timer()
+            return ctx
+
+    # Set intent before retrieval for correct top_k (procedure=100, conflict=50, else=20)
+    if "conflict" in tool_names:
+        ctx.intent = QueryIntent.CONFLICT
+    elif "procedure" in tool_names:
+        ctx.intent = QueryIntent.PROCEDURE
+
+    needs_chunks = any(t.tool_name not in ("conversational",) for t in selected_tools)
+    if needs_chunks:
         agent_retrieve(ctx)
 
-    # Execute intent tools
-    if len(intents) == 1:
-        tool_name = f"intent_{intents[0].value}"
-        result = get_registry().call(tool_name, ctx=ctx)
+    # Restore primary intent after retrieval for tool execution
+    if selected_tools:
+        try:
+            ctx.intent = QueryIntent(selected_tools[0].tool_name)
+        except ValueError:
+            ctx.intent = QueryIntent.GENERAL
+
+    # ── Step 4: Run tools in batches of 2 ──────────────────────────
+    # Key by call_id to handle same tool selected multiple times
+    total_tools = len(selected_tools)
+    completed_count = 0
+    tool_results = {}
+    batches = [selected_tools[i:i+2] for i in range(0, len(selected_tools), 2)]
+
+    for batch_idx, batch in enumerate(batches):
+        logger.info(f"Batch {batch_idx + 1}/{len(batches)}: {[s.call_id for s in batch]}")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {
+                executor.submit(_run_tool, selection, ctx): selection.call_id
+                for selection in batch
+            }
+            for future in as_completed(futures):
+                call_id = futures[future]
+                selection = next(s for s in selected_tools if s.call_id == call_id)
+                try:
+                    tool_results[call_id] = future.result()
+                except Exception as e:
+                    logger.error(f"Tool '{call_id}' raised exception: {e}")
+                    tool_results[call_id] = ToolResult(
+                        success=False, error=str(e), tool_name=selection.tool_name
+                    )
+                completed_count += 1
+                logger.info(f"Tool {completed_count}/{total_tools} done: {call_id} ({tool_results[call_id].latency_ms}ms)")
+
+        for selection in batch:
+            result = tool_results.get(selection.call_id)
+            ctx.chain.append({
+                "call_id": selection.call_id,
+                "tool": selection.tool_name,
+                "phrase": selection.phrase,
+                "success": result.success if result else False,
+                "latency_ms": result.latency_ms if result else 0,
+            })
+
+    logger.info(f"All {total_tools} tools completed ({completed_count}/{total_tools})")
+
+    # ── Step 5: Synthesize or use single tool result ────────────────
+    # Only runs after ALL tools completed (completed_count == total_tools)
+    logger.info(f"Synthesizing answer from {len(tool_results)} tool results...")
+    if len(tool_results) == 1:
+        _, result = list(tool_results.items())[0]
         if result.success and result.data.get("answer"):
             ctx.answer = result.data["answer"]
             ctx.verdict = result.data.get("verdict", "abstained")
             ctx.confidence = result.data.get("confidence", 0.0)
             ctx.citations = result.data.get("citations", [])
-            # Copy intent-specific fields
-            if "approval" in result.data:
-                ctx.approval_result = result.data["approval"]
-            if "conflicts" in result.data:
-                ctx.conflicts = result.data["conflicts"]
-            if "conflict_analysis" in result.data:
-                ctx.conflict_analysis = result.data["conflict_analysis"]
-            if "risk" in result.data:
-                ctx.risk_result = result.data["risk"]
+            _copy_tool_fields(ctx, result.data)
+        else:
+            ctx.answer = result.data.get("answer", "Unable to generate an answer.") if result.data else "Tool failed."
+            ctx.verdict = "abstained"
+            ctx.confidence = 0.0
     else:
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        answer, verdict, confidence, citations = synthesize_answer(
+            ctx.question, tool_results, ctx.access_level
+        )
+        ctx.answer = answer
+        ctx.verdict = verdict
+        ctx.confidence = confidence
+        ctx.citations = citations
+        for result in tool_results.values():
+            if result.success and result.data:
+                _copy_tool_fields(ctx, result.data)
 
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = {}
-            for intent in intents:
-                tool_name = f"intent_{intent.value}"
-                futures[executor.submit(get_registry().call, tool_name, ctx=ctx)] = intent
-
-            intent_results = {}
-            for future in as_completed(futures):
-                intent = futures[future]
-                intent_results[intent] = future.result()
-
-        ctx.intent_results = intent_results
-        ctx.answer = _merge_results(ctx.raw_question, intent_results)
-
-    # Final state
     if ctx.state != QueryState.ABSTAINED:
         ctx.state = QueryState.DONE
-
     ctx.stop_timer()
     return ctx

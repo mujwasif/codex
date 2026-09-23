@@ -7,8 +7,7 @@ Verifies that:
      the LLM classifier is unavailable (monkeypatched to fail → keyword path).
   2. Both LLM output formats parse: "procedure,0.95" and "intent: procedure
      / confidence: high".
-  3. Bare follow-ups ("for supplier termination?") inherit prior intent.
-  4. build_conflict_answer / build_risk_answer produce prose for their intents.
+  3. build_conflict_answer / build_risk_answer produce prose for their intents.
 """
 
 import os
@@ -21,7 +20,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from services.agents.orchestrator import (
     classify_intent,
-    _is_bare_followup,
     QueryContext,
     QueryIntent,
 )
@@ -81,24 +79,6 @@ class TestLLMFormats(unittest.TestCase):
         intent, conf = classify_intent("does this contradict policy")
         self.assertEqual(intent, QueryIntent.CONFLICT)
         self.assertAlmostEqual(conf, 0.7, places=3)
-
-
-class TestBareFollowup(unittest.TestCase):
-    def test_qualifier_detection(self):
-        self.assertTrue(_is_bare_followup("for supplier termination?"))
-        self.assertTrue(_is_bare_followup("and what about the firewall one?"))
-        self.assertFalse(_is_bare_followup("who can approve supplier termination"))
-
-    def test_inherits_prior_intent(self):
-        intent, conf = classify_intent("for supplier termination?", prior_intent=QueryIntent.APPROVAL)
-        self.assertEqual(intent, QueryIntent.APPROVAL)
-
-    def test_no_prior_defaults_keyword(self):
-        with mock.patch("services.agents.orchestrator.llm_generate", _fail_llm):
-            intent, _ = classify_intent("for supplier termination?")
-        # No prior intent → the bare phrase has no signal; expect GENERAL or the
-        # keyword fallback default (not an unrelated specialized intent).
-        self.assertEqual(intent, QueryIntent.GENERAL)
 
 
 class TestAnswerBuilders(unittest.TestCase):

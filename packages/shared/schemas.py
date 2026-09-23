@@ -125,6 +125,7 @@ class AnswerResponse(BaseModel):
     document_slots: Optional[List[DocumentSlot]] = None  # Per-slot candidates
     next_steps: List[str] = []  # Actionable recommendations
     missing: List[str] = []  # Required approvals/docs not satisfied
+    tool_selection: Optional[Dict[str, Any]] = None  # Tools selected by LLM
     created_at: str
 
 

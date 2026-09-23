@@ -146,7 +146,7 @@ Respond with JSON only:
         ),
         user_message=prompt,
         temperature=0.0,
-        max_tokens=1024,
+        max_tokens=4096,
         timeout=15.0,
         enable_thinking=True,
     )
@@ -263,7 +263,13 @@ def _batch_conflict_check(
             '   Example: "Must encrypt data" vs "Must backup weekly" = NOT a conflict\n\n'
             "OUTPUT RULES:\n"
             "- Only use clause IDs that appear in the list (C0, C1, C2...)\n"
-            "- Every reason MUST include a direct quote from BOTH clauses in quotes\n"
+            "- Every reason MUST include:\n"
+            "  1. A direct quote from BOTH clauses in quotes\n"
+            "  2. The source document and clause reference for each: [Doc: {title}, Clause: {ref}]\n"
+            '- Example reason: C0 says "Passwords change every 90 days" [Doc: Password Policy, Clause: 4.2] '
+            'while C2 says "Passwords change every 180 days" [Doc: Security Policy, Clause: 3.1] — '
+            "contradiction because the password rotation periods differ\n"
+            "- Confidence: 0.9+ for clear contradictions, 0.7-0.89 for possible conflicts, below 0.7 for uncertain\n"
             "- If no conflicts found, return an empty list\n"
             "- Respond ONLY with a valid JSON object"
         )
@@ -438,10 +444,17 @@ If no conflicts: {{"conflicts": []}}'''
             "4. If you found a conflict, extract the exact quotes.\n\n"
             "Do NOT report a conflict unless you can clearly explain WHY the two requirements contradict each other.\n\n"
             "RULES:\n"
-            "1. Every conflict MUST include a direct word-for-word quote from BOTH clauses.\n"
+            "1. Every conflict MUST include:\n"
+            "   a. A direct word-for-word quote from BOTH clauses\n"
+            "   b. The source document and clause reference for each clause\n"
             "2. Use the exact MATCH label (C0, C1...) as candidate_id.\n"
-            "3. If unsure, do NOT report it.\n"
-            "4. Respond ONLY with valid JSON. No markdown fences, no code blocks."
+            "3. Include document titles in the reason field.\n"
+            f'4. Example reason: TARGET says "Data retained for 7 years" [Doc: {target_doc_title}, Clause: {{ref}}] '
+            'while MATCH says "Data deleted after 90 days" [Doc: {candidate_doc_title}, Clause: {ref}] — '
+            "contradiction because retention periods conflict\n"
+            "5. Confidence: 0.9+ for clear contradictions, 0.7-0.89 for possible conflicts, below 0.7 for uncertain\n"
+            "6. If unsure, do NOT report it.\n"
+            "7. Respond ONLY with valid JSON. No markdown fences, no code blocks."
         )
         prompt = f"""Think step-by-step. You are comparing TARGET clauses from "{target_doc_title}" against MATCH clauses from other documents.
 
@@ -494,10 +507,17 @@ If no conflicts: {{"conflicts": []}}"""
             "4. If you found a conflict, extract the exact quotes.\n\n"
             "Do NOT report a conflict unless you can clearly explain WHY the two requirements contradict each other.\n\n"
             "RULES:\n"
-            "1. Every conflict MUST include a direct word-for-word quote from BOTH clauses.\n"
+            "1. Every conflict MUST include:\n"
+            "   a. A direct word-for-word quote from BOTH clauses\n"
+            "   b. The source document and clause reference for each clause\n"
             "2. Use the exact MATCH label (C0, C1...) as candidate_id.\n"
-            "3. If unsure, do NOT report it.\n"
-            "4. Respond ONLY with valid JSON. No markdown fences, no code blocks."
+            "3. Include document titles in the reason field.\n"
+            '4. Example reason: TARGET says "Data retained for 7 years" [Doc: Retention Policy, Clause: 2.1] '
+            'while MATCH says "Data deleted after 90 days" [Doc: Security Policy, Clause: 3.4] — '
+            "contradiction because retention periods conflict\n"
+            "5. Confidence: 0.9+ for clear contradictions, 0.7-0.89 for possible conflicts, below 0.7 for uncertain\n"
+            "6. If unsure, do NOT report it.\n"
+            "7. Respond ONLY with valid JSON. No markdown fences, no code blocks."
         )
         prompt = f"""For each TARGET below, think through its MATCH clauses step by step.
 

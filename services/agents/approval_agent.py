@@ -212,7 +212,8 @@ def resolve_approval(
     answer_parts = []
     if matching_roles:
         answer_parts.append(
-            f"Approval authority for '{process}': {', '.join(matching_roles)}"
+            f"Approval authority for '{process}': {', '.join(matching_roles)} "
+            f"[Source: Knowledge Graph — Process: {process}]"
         )
     else:
         answer_parts.append(
